@@ -1,0 +1,1091 @@
+---
+title: "Praktikum 1: Bayes Netze"
+author: "Mike Siefert, Maximilian Neudert"
+date: 
+output: 
+  pdf_document:
+    includes:
+      in_header: config.sty
+          
+
+
+documentclass: article
+<!---output: beamer_presentation--->
+---
+
+
+
+
+
+<!--- Below are global settings for knitr. You can override any of them by adding the changes to individual chunks --->
+
+```{r package_options, include=FALSE, eval=TRUE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=TRUE,     # collapse by default
+                      echo=FALSE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 7,     # set figure width
+                      out.width = "100%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=FALSE)  # show R messages
+```
+
+
+
+<!--- Solution Region --->
+<style>
+#solution {
+  background-color: #8FBC8F;
+  border-style: solid;
+  border-color: blue;
+  margin-left: 20px;
+  margin-bottom: 15px;
+  padding: 5px;
+}
+</style>
+
+
+
+\section{Praktikum 1: Bayes Netze}
+\textit{Machen Sie sich mit der Modellierung von Bayes-Netzen mittels des R-Packages bnlearn vertraut.}
+
+\subsection{Teilaufgabe a: Car Evaluation - Naive Bayes | Bayes Netze}
+\textit{Laden Sie den Car Evaluation Data Set von https://archive.ics.uci.edu/ml/datasets/Car+Evaluation
+herunter. Klassifizieren Sie mit dem R-Package bnlearn den Datensatz anhand der "car acceptability". Implementieren Sie dazu zum einen einen naiven Bayes Klassifizierer und zum anderen ein Bayes Netz, das mit Hilfe des TAN Verfahrens erstellt wurde. (jeweils mit bnlearn)}
+
+
+  
+\begin{table}[h]
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Merkmal} & \textbf{Beschreibung}                     & \textbf{Skalenniveau} & \textbf{Beispiel}    \\ \hline
+\textbf{buying}          & Kaufpreis                                 & ordinal               & "low","med","high","vhigh"   \\ \hline
+\textbf{maint}           & Wartungskosten                            & ordinal               & "low","med","high","vhigh"  \\ \hline
+\textbf{doors}           & Anzahl der Türen                          & ordinal               & "2","3","4","5more"  \\ \hline
+\textbf{persons}         & Sitzplätze             & ordinal               & "2","4","more"       \\ \hline
+\textbf{lug\_boot}       & Größe des Gepäckraums                     & ordinal               & "small","med","big"  \\ \hline
+\textbf{safety}          & Geschätze Sicherheitseinstufung & ordinal               & "high","low","med"   \\ \hline
+\textbf{Target}          & Autoakzeptanz                        & ordinal               & "unacc", "acc", "good", "vgood" \\ \hline
+\end{tabular}
+\caption{Car Evaluation Data Set: Übersicht der Merkmale}
+\label{tab:prakt1_data_overview}
+\end{table}
+
+Zunächst verschaffen wir uns einen Überblick über den zugrundeliegenden Datensatz und der gegeben Merkmale. Die Merkmale sind in Tab.\ref{tab:prakt1_data_overview} zu entnehmen. Alle Merkmale weisen ein ordinales Skalenniveau auf. 
+
+```{r}
+#stopCluster(cl)
+```
+
+
+```{r echo=FALSE, warning =FALSE}
+#setwd("C:/Users/datahipster/Documents")
+# install.packages("visnetwork")
+# install.packages("bnlearn")
+# install.packages("bnclassify")
+# install.packages("bnviewer")
+# 
+# install.packages("BiocManager")
+# BiocManager::install(version = "3.10")
+# BiocManager::install("BiocGenerics")
+# BiocManager::install("parallel")
+# BiocManager::install("gRain")
+# BiocManager::install("Rgraphviz")
+# BiocManager::install("graph")
+# 
+
+library(readr)
+library(tidyr)
+library(dplyr)
+
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(ggpubr)
+#library(hrbrthemes)
+library(Rgraphviz)
+
+
+library(bnlearn)
+library(caTools)
+library(caret)
+library(ROCR)
+
+
+#-> Parallel Setup: CV 
+library(parallel)
+library(snow)
+
+set.seed(42)
+
+#stopCluster(cl)
+
+cores <- detectCores() - 1
+cl <- makeCluster(cores, type = "SOCK")
+
+
+# Import data
+df <- read_csv("data/car.data", col_names = F)
+df <- na.omit(as.data.frame(df))
+
+
+# --Create new feature -> binary classification problem
+#df <- df %>% mutate(ACCEPT = ifelse(X7 == "unacc","unacc","acc"))
+
+# Prepare data
+for(i in 1:ncol(df)){
+df[,i] <- as.factor(df[,i])
+}
+
+attributes(df) <- NULL
+
+# --names(df) <- c("buying","maint","doors","persons","lug_boot","safety","Acceptability","Target")
+names(df) <- c("buying","maint","doors","persons","lug_boot","safety","Target")
+df <- data.frame(df)
+
+# --Test
+#df$Acceptability <- NULL
+
+# Create Train / Test Split
+set.seed(101) 
+sample = sample.split(df$Target, SplitRatio = .70)
+train = subset(df, sample == TRUE)
+test  = subset(df, sample == FALSE)
+
+
+head(train)
+```
+
+
+Das Merkmal \textbf{buying} spiegelt den Kaufpreis wieder. Hierbei wird von einem niedrigen Kaufpreis \textit{low} bis zu einem sehr hohen Kaufpreis \textit{vhigh} unterschieden. Neben den Anschaffungskosten (Kaufpreis) entstehen über die Zeit weitere Kosten, diese werden im Merkmal \textbf{maint} erfasst. Dabei stellt \textit{low} geringe Wartungskosten dar und im Kontrast hierzu \textit{vhigh} sehr hohe Wartungskosten. Hinsichtlich der mobilen Beschaffenheit des Autos lassen sich die Merkmale \textbf{doors} (Anzahl der Türen), \textbf{persons} (potenzielle Sitzplätze) und \textbf{lug\_boot} (Stauraum im Kofferraum) heranziehen. Das Merkmal \textbf{safety} repräsentiert eine geschätze Sicherheitseinstufung des Autos, welche zwischen \textit{low} und\textit{high} liegt. Die Response Variable bzw. Zielvariable \textbf{Target} repräsentiert die Akzeptanz gegenüber diesem Auto, welche von \textit{unacc} (nicht akzeptiert) über \textit{acc} (akzeptiert) und \textit{good} (gute Akzeptanz) bis schließlich \textit{vgood} (sehr gute Akzeptanz) reicht.
+
+Wir interessieren uns nun für die gemeinsame Verteilung der Daten. Mit Hilfe dieser können wir mittels Inferenz neue Beobachtungen klassifizieren, somit wäre es zum einen Interessant zu ermitteln, mit welcher Wahrscheinlichkeit ein bestimmtes Auto akzeptiert wird, wenn dieses bestimmte Eigenschaften erfüllt. Hierfür ziehen wir zwei Ansätze heran \textbf{\textit{Naive Bayes}} und die \textbf{\textit{Bayes Netze}}.  
+
+Für eine nachfolgende vereinfachte Darstellung sei $buying = X_1$,$maint = X_2$,$doors = X_3$,$persons = X_4$,$lug\_boot = X_5$,$safety = X_6$ und $Target = Y$. Weiterhin splitten wir den Datensatz in einen Datensatz zum Trainieren ($70\%$) und einen Datensatz zum Testen der Modell Güte ($30\%$) auf.
+
+Wir interessieren uns für die Wahrscheinlichkeit $P(h_{acc} | X_1=a_1,...,X_6=a_6)$ die angibt, ob das Auto unter gegeben Beobachtungen akzeptiert wird. Hierbei orientieren wir uns an der Herangehensweise der Bayesianer, welche die gegeben Beobachtungen als fix betrachten. Wir interessieren uns somit viel mehr für die Verteilung der zugrunde liegenden Parameter unter gegeben fixen Daten $a_{1,i},...,a_{6,i} \in \mathcal{D}$ mit i=1,...,n. Dabei bildet $H$ den Hypothesen-Raum aller möglichen Parametern ab. Gesucht ist nun $P(h_i | a_1,...,a_6)$ , jedoch wissen wir nur $P( a_1,...,a_6 | h_i)$. Wir interessieren uns für $P(h_i | a_1,...a_6)$, wobei für die Hypothesen $h_i$ mit $i \in \{\textrm{(1:unacc), (2:acc), (3:good), (4:vgood)} \}$ betrachtet werden. Daher wir suchen die Parameter die, die größte \textbf{\textit{Maximum A Posteriori Wahrscheinlichkeit}} (MAP) aufweisen. Ein erster Blick auf die relativen Häufigkeiten der Zielvariable des vorliegenden Datensatzes fällt auf, dass etwas 70 % der Beobachtungen bei gegebenem Merkmal Target \textit{unacc} vorzeigten, somit das Auto nicht akzeptiert haben.  
+
+```{r}
+set.seed(42)
+
+# Ermittle relative Häufigkeit der Klassen
+train_plot_data = train %>% 
+                    count(Target) %>%
+                    mutate(rel_freq = (n / length(train$Target)))
+
+
+test_plot_data = test %>% 
+                    count(Target) %>%
+                    mutate(rel_freq = (n / length(test$Target)))
+  
+
+
+
+# Erstelle Plots
+train_plot <- ggplot() +
+                geom_bar(data = train_plot_data, mapping = aes(x=Target, 
+                                                        y=rel_freq, 
+                                                        color=Target, 
+                                                        fill=Target), stat="identity") +
+                ggtitle("Verteilung Trainingsdaten") + 
+                scale_x_discrete(limits=c("unacc","acc","good","vgood"))+
+                ylab("Relative Häufigkeit")+
+                xlab("Y = Target")
+
+test_plot <- ggplot() +
+                geom_bar(data = test_plot_data, mapping = aes(x=Target, 
+                                                        y=rel_freq, 
+                                                        color=Target, 
+                                                        fill=Target), stat="identity") +
+                ggtitle("Verteilung Testdaten") + 
+                scale_x_discrete(limits=c("unacc","acc","good","vgood"))+
+                ylab("Relative Häufigkeit")+
+                xlab("Y = Target")
+
+# Plotte in gemeinsamen Output via ggpubr 
+ggarrange(train_plot,test_plot,ncol=2, common.legend = TRUE, legend="bottom")
+
+```
+
+Mittels des Satzes von Bayes (vgl. Gl. \ref{eq:satz_bayes}) erhalten wir die \textbf{\textit{a posteriori Wahrscheinlichkeit}} $P(h_i|a_1,...,a_6)$. Weiterhin stellt $P(a_1, a_2 , a_3, a_4, a_5, a_6|h_i)$ unseren Likelihood dar und $P(h_i)$ unsere \textbf{\textit{a priori Wahrscheinlichkeit}}.
+
+\begin{equation}\label{eq:satz_bayes}
+ P(h_i|a_1,...,a_6) = \frac{P(a_1, a_2 , a_3, a_4, a_5, a_6|h_i) \cdot P(h_i)}{P(a_1, a_2 , a_3, a_4, a_5, a_6)}
+\end{equation}
+
+Das besondere hierbei ist, dass wir zusätzliche Informationen über die a priori Wahrscheinlichkeit dem Modell beifügen können. Die gemeinsame Verteilung der Beobachtungen $P(a_1, a_2 , a_3, a_4, a_5, a_6)$ im Nenner, dient als Normalisierung. Diese lässt sich mit Hilfe des Satzes der totalen Wahrscheinlichkeit, wodurch der Divisor die gewichteten Likelihood über alle möglichen Parameter abbildet, berechnen. Hierfür benötigte man alle kombinatorischen Möglichkeiten daher eine hinreichend große Menge an Daten, welche alle kombinatorischen Möglichkeiten abdecken würde. Für den binären Fall würde sich der Parametersuchraum auf $2^n$ ausweiten - exponentielles Wachstum! Für unseren Fall entspreche dies $4^3 \cdot 3^3 = 576$ Variationen, was zwar noch hinreichenend klein ist, jedoch in der Praxis mit hinzunahme weiterer Zufallsvariablen zu sehr langen Berechnungszeiten führen kann. 
+
+
+Neben der Alternativen die tatsächliche gemeinsame Verteilung zu berechnen, bilden zwei weitere Ansätze eine Möglichkeit die Verteilung zu approximieren. Die \textit{Naive Bayes} (NB) Methode (vgl. Gl.\ref{eq:naive_bayes}) geht vereinfacht davon aus, dass bestimmte Kombinationen wahrscheinlich weniger häufiger auftreten und daher ignoriert werden können, wodurch wir eine approximative Verteilung erhalten. Diese Methode nimmt also an, dass die Kovariaten $a_1,...,a_6$ voneinander unabhängig sind (harte Annahme!). 
+
+\begin{equation}\label{eq:naive_bayes}
+  h_{MAP} = \underset{h_i \in H}{\mathrm{argmax}} = \prod_{i=1}^{6}P(a_1,...,a_6|h_i) \cdot P(h_i)
+\end{equation}
+
+Dieser Ansatz ist weniger rechenintensiv. Nachteilig ist hierbei, dass es sich um eine Approximation handelt. Dennoch erfreut sich dieser vereinfachte Ansatz besonderer Beliebheit in der Praxis aufgrund seiner Erklärbarkeit und guten Performanz. 
+
+
+Neben diesen beiden extremen Herangehensweisen, vollständige Berücksichtigung der Abhängigkeitstrukturen und den kompletten Verzicht jener, stellen die \textit{Bayes Netze} eine besonders schönen Mittelweg dar. 
+
+Dieser Ansatz verfolgt das Ziel eine multivariate Verteilung graphisch darzustellen. Da ebenfalls wie Entscheidungsbäume, Graphen eine gute Grundlage bieten, um komplexere Sachverhalte wiederzugeben, ist auch dieser Ansatz beliebt in der Praxis. Es handelt sich hierbei um einen azyklischen gerichteten Graph (DAG), dessen Knoten Zufallsvariablen $V=\{X_1,...,X_n\}$ repräsentieren und Kanten $E =\{(X_i,X_j) | X_i , X_j \in V i , i \not=j  \}$, welche zwischen diesen Knoten Abhängigkeitsstrukturen darstellen. Das besondere hierbei ist, dass lediglich die Annahme getroffen wird, dass der Zustand eines Knoten lediglich von seinen direkten Vorgänger (Elternknoten) abhängt (vgl. Gl. \ref{eq:assumption_bayesnet}). Man bezeichnet diese Annahme auch als \textit{\textbf{Global Semantics}}.
+
+\begin{equation}\label{eq:assumption_bayesnet}
+ P(X_1,...,X_n) = \prod_{i=1}^{n} P(X_i | Parents(X_i))
+\end{equation}
+
+\begin{equation}\label{eq:parents_bayesnet}
+  P(X_i | Parents(X_i)) = P(X_i | X_1,...,X_{i-1})
+\end{equation}
+
+Die gemeinsame Verteilung lässt sich mittels der Kettenregel (engl. chain rule) ermitteln, indem man die Wahrscheinlichkeiten vom Wurzelknoten bis zum Zielknoten multipliziert (vgl. Gl. \ref{eq:parents_bayesnet}). Dies hat zwei wesentliche Vorteile. Zum einen ermöglicht dies uns bestimmte Abhängigkeiten in unser Modell fließen zu lassen, zum anderen aber auch, dass wir hierdurch eine Reduzierung der vorherige Laufzeitkomplexität von $O(2^n)$ zu $O(n \cdot 2^k)$ gelangen. Hierbei steht $k$ für die Anzahl der Elternknoten, da die meisten Domänen nur bestimmte Abhängigkeitsstrukturen aufzeigen gilt in der Regel $k<n$. Die Modellierung hängt hierbei ganz vom Interessenstandpunkt ab. Neben der kausalen Wissensmodellierung (engl. causal knowledge), welche oftmals durch klare Abhängigkeitsstrukturen über Domänen Experten bestimmt werden. Gibt es auch die diagnotische Wissensmodellierung (engl. diagnostic Knowledge), welche Abhängigkeitsstrukturen berücksichtigt, welche das Modell ziemlich genau machen, jedoch schwieriger zu erfassen sind, da diese Strukturen oftmals nicht direkt ersichtlich sind. 
+
+\begin{equation}
+\mathbf{P}(\mathcal{M} | \mathcal{D})=\mathbf{P}(\mathcal{G}, \Theta | \mathcal{D})=\mathrm{P}(\mathcal{G} | \mathcal{D}) \quad \cdot \quad \mathrm{P}(\Theta | \mathcal{G}, \mathcal{D})
+\label{eq:bayes_net_prob}
+\end{equation}
+
+
+Das Modell $\mathbf{P}(\mathcal{M} | \mathcal{D})$ wird somit über zwei Parameter $\mathcal{G}$ und $\Theta$ definiert (vgl. Gl.\ref{eq:bayes_net_prob}). Die graphische Struktur $\mathcal{G}$ ergibt sich durch die a posteriori Wahrscheinlichkeit $\mathrm{P}(\mathcal{G} | \mathcal{D})$  (engl. structure learning). Diese Struktur wird benötigt, um letztlich die lokalen Wahrscheinlichkeitsverteilungen $\Theta$ zu ermitteln, welche sich über die Daten und die Struktur des Netzes, $\mathrm{P}(\Theta | \mathcal{G}, \mathcal{D})$, ergeben. 
+Neben den \textit{\textbf{Global Semantics}} existieren noch die \textit{\textbf{Local Semantics}}. Während die global Semantics, das gesamte Netz als eine gemeinsame Verteilung betrachten, welche über das Produkt lokaler bedingter Verteilungen im Netz ermittelt wird, so gewährleisten die locale Semantics, dass diese bedingt Unabhängig von einader sind. 
+
+Hierbei stellen die Markov Blankets eine äußerst hilfreich Möglichkeit bereit, indem Sie eine Menge von Knoten definieren, welche die zu betrachtende Zufallsvariable als eine Folge bedingt unabhänger Zustände modelliert. So wird die Wahrscheinlichkeitsverteilunge eines einzelnen Knoten lediglich durch sein Markov Blanket bestimmt. Diese hängen neben der topologischen Struktur des Modells (Reihenfolge der gewählten Zufallsvariablen im Graph) auch von dem Interessenstandpunkt (causal vs. diagnostic knowledge) ab, da dies die Anzahl der Kanten bestimmt. Das Lernen des Modells erfolgt somit über zwei Schritte (1) Finde eine geeignte Netz-Struktur $\mathcal{G}$, (2) ermittle lokale Wahrscheinlichkeitsverteilungen $\Theta$ mittels der Netz-Struktur $\mathcal{G}$.
+
+
+Das R-Package \textit{bnlearn: ``Bayesian network structure learning, parameter learning and inference''} stellt das passende Werkzeug für unser weitere Vorgehen bereit. Das strukturelle Lernen des Bayes Netzes erfordert einen Trade-Off, welcher Abhängig vom Interessenstandpunkt ist. Das Lernen eines optimalen Bayes Netzes ist NP-schwer (nicht deterministische Polynomialzeit). Wir werden hierfür bestimmte Varianten des strukturellen Lernen beobachten und vergleichen. NB wird uns eine äußerst schlichte Netz-Struktur bieten. Eine weitere Variante, welche weniger rechenintensiv ist, ist der sogenannte \textit{\textbf{Tree-Augmented Naive Bayes}} (TAN). Diese kann als eine Erweiterung des Naive Bayes Ansatzes gesehen werden. Es wird zunächst ein Naive Bayes Modell erzeugt (Grundgerüst des Netzes). Die Kovariaten sind untereinander unabhängig. Nun wird für das strukturelle Lernen des Netzes basiert auf den \textit{Chow-Liu} Ansatz zurückgeriffen, welcher einen \textit{\textbf{Maximum Weight Spanning Tree}} (MWST) erzeugt. Hierbei wird \textit{jeweils} ein DAG für die Kovariaten erzeugt, welcher sich immer für die größtmögliche gewichtete Kante zwischen diesen entscheidet und den Graph dabei azyklisch lässt. Die Approximation veranlasst, dass ausgegangen vom Klassen Knoten (Wurzelknoten) alle direkten Knoten (Kinder) maximal ein Elternknoten der anderen Kinderknoten erhalten. Das bedeutet, dass wir lediglich zwei Kovariaten zu lassen, welche einen direkten Einfluss auf den betrachteten Knoten haben (Wurzelknoten + 1 Nachbar) - wodurch maximal zwei Elternknoten aus dem Modell folgen. In \textit{bnlearn} ist der TAN Ansatz implementiert in der Klasse \textbf{tree.bayes}. Besonders hervorzuheben sind die Parameter \textit{\textbf{whitelist}} und \textit{\textbf{blacklist}}. Diese ermöglichen uns Domänen-Wissen zu strukturellen Abhängigkeiten mit ins Modell fließen zu lassen. Über die \textit{whitelist} werden Beziehungen definiert, welche im Modell vorkommen müssen. Das Pendant ist die \textit{blacklist}, welche gezielt bestimmte Beziehungen ausschließt. Die a priori Wahrscheinlichkeit wird über den Parameter \textit{\textbf{prior}} gesteuert. Neben diesen beiden eher approximativen Varianten fürs strukturelle Lernen des Netzes, implementiert \textit{bnlearn} viele weitere Algorithmen, welche sich hauptsächlich in 3 Kategorien zusammenfassen lassen. 
+
+\begin{itemize}
+\item \textbf{Constraint-Based Learning}: Nutzen bedingte Unabhängigkeitstests und nehmen an, dass die Daten den perfekten DAG widerspiegeln.
+\item \textbf{Score-Based Learning}: Erzeuge mehrere DAG. Jeder DAG wird bewertet. Optimierungsproblem: Ziel maximiere Bewertungsfunktion f(x) und wähle DAG, welcher f(x) maximiert.
+\item \textbf{Hybrid Learning}: Nutzt bedingte Unabhängigkeitstests, um kleinere Menge an bedingten Unabhängigkeiten (Kanten) zu ermitteln. Dies reduziert den Suchraum für eine Score-based Variante.
+\item \textbf{Pairwise Mutual Information}: Approximieren ein Netz, indem Sie paarweise den Informationsgewinn ermitteln.
+\end{itemize}
+
+\textbf{Constraint-Based Learning} ist demnach stark abhängig von der Wahl des bedingten Unabhängigkeitstest. Diese konvergieren meist langsamer als Score-based und Hybrid Verfahren, da Sie alle Variablen Kombinationen durchgehen müssen. Das ständige betrachten einzelner Teilmengen des Datensatz macht diese Alogrithmen dennoch sehr Memory-Effizient. Darüberhinaus lässt sich diese Prozedur gut parallelisieren, womit eine gute Skalierbarkeit einhergeht. Das \textbf{Score-Based Learning} konvergiert schneller, erfordert jedoch Heuristiken, da Suchraum meist zu groß ist. Dadurch ist ein globales Maximum nicht garantiert. \textbf{Hybrid Learning} nutzt Methoden beider Vorgänger, so werden bedingte Unabhängigkeitstests gewählt, um die Grundlage für das Netzwerk (d.h. Restriktion der Anzahl möglicher Kandidaten) zu schaffen. Dann wird eine Score-Funktion definiert, welche es zu maximieren gilt. In die letzte Kategorie der \textbf{Pairwise Mutual Information} Algorithmen fällt auch der TAN Algorithmus. Hier werden paarweise Vergleiche der Kanten herangezogen mit dem Ziel den Informationsgewinn zu maximieren.
+
+Nachdem wir die Struktur erlernt haben, können wir die lokalen bedingten Wahrscheinlichkeitsverteilungen schätzen. Hierfür bietet \textit{bnlearn} die \textbf{bn.fit} Methode, welche diese dann aus den gegebenen Daten und der ermittelten Abhängigkeitsstruktur schätzt. Der Parameter \textit{method} gibt uns die Möglichkeit die lokalen bedingten Wahrscheinlichkeiten mittels \textbf{Maximum Likelihood} (ML) festzulegen oder \textbf{Bayes}, welches die Schätzung auf Grundlage mehrer Parameterschätzungen festlegt. Wir werden den bayesianischen Weg gehen und uns auf die \textbf{Maximum A Posteriori} Wahrscheinlichkeit (MAP) verlassen. Die allgemeine Vorgehensweise hierfür wäre wie folgt.
+
+
+\begin{enumerate}
+\item Lege a priori Wahrscheinlichkeit des Parameters $P(\theta)$ fest 
+\item Wähle einen beliebigen Parameter $\theta$ (z.B. Hypothese \{acc, unacc\})
+\item Füge Parameter in generatives Modell ein (z.B. Likelihood $P(D|\theta_h=acc)$ )
+\item Simuliere Daten und schätze Verteilung des Parameters
+\item Wähle die Hypothese, welche a posterori Wahrscheinlichkeit maximiert (MAP)
+\end{enumerate}
+
+Je mehr Beobachtungen wir haben desto weniger wichtig wird die vorherige Information (prior) im Modell. Umgekehrt je weniger Beobachtungen wir haben, desto stärker fällt die a priori Wahrscheinlichkeit ins Gewicht. 
+
+Experimentell werden wir nun diese beiden erläuterten Modelle NB und TAN evaluieren. Dabei werden wir einmal mit und einmal ohne den Einfluss von Domänen Wissen das TAN evaluieren\footnote{Es sei angemerkt, dass wir keine Experten Wissen besitzen und es sich hier lediglich um eine simulierte Gegenüberstellung handelt.}. 
+
+Um eine relativ genaue Fehlerabschätzung zu erhalten wenden wir die \textit{K-Fold Cross-Validation}(CV) an. Wir wählen für $K=10$ Teilmengen, wobei wir diese 10 mal durchführen, um eine gute approximative Verteilung des Fehlers zu erhalten. Wir verwenden hierbei die Loss-Funktion \textit{Posterior Classification Error}. 
+
+```{r}
+# # Grow-Shrink (gs): based on the Grow-Shrink Markov Blanket, the first (and simplest) Markov blanket detection algorithm used in a structure learning algorithm.
+
+# test <- gs(df,undirected = FALSE, debug = TRUE)
+# out <- capture.output(gs(df,undirected = FALSE, test = "mc-mi", debug = TRUE))
+# head(out, n=1)
+```
+
+
+
+```{r}
+# Constraint-Based Algorithm
+#Hiton Parents and Children (si.hiton.pc): a fast forward selection technique for neighbourhood detection designed to exclude nodes early based on the marginal association. The implementation follows the Semi-Interleaved variant of the algorithm.
+
+# test <- si.hiton.pc(df,undirected = FALSE, debug = TRUE)
+# out <- capture.output(si.hiton.pc(df,undirected = FALSE, test = "mc-mi",cluster = cl, debug = TRUE))
+# head(out, n=1)
+```
+
+
+```{r}
+# Another very useful function is ci.test(), which performs a single
+# marginal or conditional independence test using the same backends as
+# constraint-based algorithms.
+
+#ci.test(x = "Target", y = "buying", z = "safety", data = df, test = "mc-mi")
+```
+
+
+
+\newpage
+\subsubsection{Modellierung: Naive Bayes}
+Wir trainieren nun erstmal den \textit{Naive Bayes} Klassifizierer, welcher in \textit{bnlearn} in \textbf{naive.bayes} implementiert ist.
+
+```{r warning=FALSE}
+set.seed(42)
+
+# https://www.bnlearn.com/documentation/man/bn.cv.html
+################ Losses #########################
+# loss: Classification Error (pred): the prediction error for a single node in a discrete network. Frequentist predictions are used, so the values of the target node are predicted using only the information present in its local distribution (from its parents).
+
+#Posterior Classification Error (pred-lw and pred-lw-cg): similar to the above, but predictions are computed from an arbitrary set of nodes using likelihood weighting to obtain Bayesian posterior estimates. pred-lw applies to discrete Bayesian networks, pred-lw-cg to (discrete nodes in) hybrid networks.
+
+#Note that if bn is a Bayesian network classifier, pred and pred-lw both give exact posterior predictions computed using the closed-form formulas for naive Bayes and TAN.
+
+naive_bayes_net <- naive.bayes(train, "Target")
+
+cv_naive_bayes_test <- bn.cv(test, naive_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+cv_naive_bayes_train <- bn.cv(train, naive_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+
+par(mfrow=c(1,2))
+plot(cv_naive_bayes_train,cv_naive_bayes_test,
+     xlab=c("Trainings-Error","Test-Error"), 
+     main="Naive Bayes \n [Bayesian]")
+
+
+     
+```
+
+
+```{r}
+# Evaluation der Trainingsdaten
+cv_naive_bayes_train
+
+```
+
+Wir sehen, dass der Trainingsfehler im Mittel bei 0.1566942 ($\pm$ 0.005661811). Das Modell hat sich somit gut an die Trainingsdaten angepasst.
+\newpage
+```{r}
+# Evaluation der Testdaten
+cv_naive_bayes_test
+```
+
+Bei Betrachtung des Test-Fehlers sehen wir einen etwas höheres Mittel von 0.1671815 ($\pm$ 0.006637733).
+
+```{r}
+#Naive Bayes Classifier
+fitted_naive_bayes <- bn.fit(naive_bayes_net, train, method="bayes")
+pred = predict(fitted_naive_bayes, test)
+
+confusionMatrix(pred, reference = test$Target)
+
+```
+
+Die finale Klassifizierung unser trainierten NB Modell zeigt eine besonders hohe sensivität gegenüber unacc auf. Was aufgrund der einhergehenden Betrachtung der Verteilung zu erwarten war. Die Klassen \textit{good} und \textit{vgood} werden weniger gut erkannt. Eine denkbare Überlegung wäre es die Daten zusammenzufassen. Unter Berücksichtigung eines wirtschaftlichen Kontext, könnte man lediglich daran interessiert sein, ob ein potenzieller Kunde ein Auto akzeptiert oder nicht akzeptiert. Man könnte somit die Klassen \textit{good} und \textit{vgood} mit der Klasse \textit{acc} vereinigen. Obwohl die Accuracy bei 0.8764 liegt, könnte diese Vereinigung das Modell robuster machen.
+
+\newpage
+\subsubsection{Bayes Netz: TAN Verfahren}
+
+Nun trainieren wir den Tree-Augmented Naive Bayes Klassifizierer. 
+
+```{r warning=FALSE}
+set.seed(42)
+# https://www.bnlearn.com/documentation/man/bn.cv.html
+################ Losses #########################
+# loss: Classification Error (pred): the prediction error for a single node in a discrete network. Frequentist predictions are used, so the values of the target node are predicted using only the information present in its local distribution (from its parents).
+
+#Posterior Classification Error (pred-lw and pred-lw-cg): similar to the above, but predictions are computed from an arbitrary set of nodes using likelihood weighting to obtain Bayesian posterior estimates. pred-lw applies to discrete Bayesian networks, pred-lw-cg to (discrete nodes in) hybrid networks.
+
+#Note that if bn is a Bayesian network classifier, pred and pred-lw both give exact posterior predictions computed using the closed-form formulas for naive Bayes and TAN.
+
+tan_bayes_net <- tree.bayes(train, "Target")
+
+cv_tan_bn_test <- bn.cv(test, tan_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+cv_tan_bn_train <- bn.cv(train, tan_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+
+
+plot(cv_tan_bn_train,cv_tan_bn_test,
+     xlab=c("Trainings-Error","Test-Error"), 
+     main="TAN - Bayes Netz \n [Bayesian]")
+
+```
+
+Die Berücksichtigung mancher Abhängigekitsstrukturen zahlt sich aus. Wir können im obigen Plot bereits eine deutliche Verbesserung erkennen.
+
+```{r}
+# Evaluation der Trainingsdaten
+cv_tan_bn_train
+```
+
+Der mittlere Trainingsfehler-Fehler liegt bei 0.06636364 ($\pm 0.005242128$).
+\newpage
+
+```{r}
+# Evaluation der Testdaten
+cv_tan_bn_test
+```
+
+
+Bei Betrachtung des Test-Fehlers sehen wir einen etwas niedrigeren mittleren Wert von 0.08996139 ($\pm$ 0.009244934).
+Wir erreichen somit eine mittlere Genauigkeit von `r 1-0.08996139` auf den Testdaten.
+
+\newpage
+
+```{r}
+set.seed(42)
+
+fitted_tan_bn <- bn.fit(tan_bayes_net, train, method="bayes")
+pred = predict(fitted_tan_bn, test)
+confusionMatrix(pred, reference = test$Target)
+```
+
+Die Modell Genauigkeit liegt bei 0.9498. Wir hatten zu Beginn des Experiments den \textit{method} Parameter nicht entdeckt. Wir erlangten zuvor eine finale Genauigkeit den Testdaten von 0.3243. Es fiel besonders auf, dass \textit{unacc} eine Sensivität von 0.2948 aufwies. Das war ziemlich niedrig. Unser vorherigen Überlegungen zu einem binären Klassifizierungsmodell überzugehen, wurden hier nochmal verstärkt gestützt. Betrachtete man die vorherige Konfusionsmatrix, so sah man sehr gut, dass \textit{acc} eine hohe Varibilität aufzeigte. Das Modell konnte hier nicht gut \textit{acc},\textit{good} und \textit{vgood} differenzieren. 
+
+
+\textbf{Anmerkung: Wir werden nachfolgend die Zielklasse zusammengefassen. Wir nehmen an, dass die mehrwertschöpfende Fragestellung sich an den Absatz richtet. Weiterhin nehmen wir an, dass man ein Auto akzeptiert oder nicht akzeptiert. Hierdurch fassen wir nun folgende Ausprägungen zusammen $\{acc,good,vgood\} \Rrightarrow \{acc\}$, wodurch sich nun der Hypothesenraum auf $\{unacc,acc\}$ reduziert hat. Folglich liegt nun ein binäres Klassifikationsproblem vor.}
+
+
+```{r warning=FALSE}
+# Import data
+df2 <- read_csv("data/car.data", col_names = F)
+df2 <- na.omit(as.data.frame(df2))
+
+
+# --Create new feature -> binary classification problem
+df2 <- df2 %>% mutate(ACCEPT = ifelse(X7 == "unacc","unacc","acc"))
+
+# Prepare data
+for(i in 1:ncol(df2)){
+df2[,i] <- as.factor(df2[,i])
+}
+
+attributes(df2) <- NULL
+
+names(df2) <- c("buying","maint","doors","persons","lug_boot","safety","Acceptability","Target")
+
+df2 <- data.frame(df2)
+
+# --Test
+df2$Acceptability <- NULL
+
+# Create Train / Test Split
+set.seed(101) 
+sample = sample.split(df2$Target, SplitRatio = .70)
+train2 = subset(df2, sample == TRUE)
+test2  = subset(df2, sample == FALSE)
+######################################################################################################
+
+# Ermittle relative Häufigkeit der Klassen
+train_plot_data2 = train %>% 
+                    count(Target) %>%
+                    mutate(rel_freq = (n / length(train$Target)))
+
+
+test_plot_data2 = test %>% 
+                    count(Target) %>%
+                    mutate(rel_freq = (n / length(test$Target)))
+  
+
+
+
+# Erstelle Plots
+train_plot2 <- ggplot() +
+                geom_bar(data = train_plot_data2, mapping = aes(x=Target, 
+                                                        y=rel_freq, 
+                                                        color=Target, 
+                                                        fill=Target), stat="identity") +
+                ggtitle("Verteilung Trainingsdaten") + 
+                scale_x_discrete(limits=c("unacc","acc"))+
+                ylab("Relative Häufigkeit")+
+                xlab("Y = Target")
+
+test_plot2 <- ggplot() +
+                geom_bar(data = test_plot_data2, mapping = aes(x=Target, 
+                                                        y=rel_freq, 
+                                                        color=Target, 
+                                                        fill=Target), stat="identity") +
+                ggtitle("Verteilung Testdaten") + 
+                scale_x_discrete(limits=c("unacc","acc"))+
+                ylab("Relative Häufigkeit")+
+                xlab("Y = Target")
+
+# Plotte in gemeinsamen Output via ggpubr 
+ggarrange(train_plot2,test_plot2,ncol=2, common.legend = TRUE, legend="bottom")
+```
+
+Wir haben zwar die Zielvariable angepasst, dennoch dominiert noch \textit{unacc}.
+
+```{r warning=FALSE}
+set.seed(42)
+#Naive Bayes Classifier
+naive_bayes_net2 <- naive.bayes(train2, "Target")
+
+cv_naive_bayes_test.new <- bn.cv(test2, naive_bayes_net2, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+cv_naive_bayes_train.new <- bn.cv(train2, naive_bayes_net2, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+
+
+# TAN Classifier
+tan_bayes_net2 <- tree.bayes(train2, "Target")
+
+cv_tan_bn_test.new <- bn.cv(test2, tan_bayes_net2, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+cv_tan_bn_train.new <- bn.cv(train2, tan_bayes_net2, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+
+
+```
+
+
+
+```{r}
+plot(cv_naive_bayes_test,cv_tan_bn_test,
+    cv_naive_bayes_test.new,cv_tan_bn_test.new,
+     xlab=c("NB vorher","TAN vorher",
+            "NB nachher","TAN nachher"),
+     main="Vergleich vor und nach Vereinigung der Zielvariablenausprägungen \n - Klassifizierungsfehler auf Testdaten")
+
+
+plot(cv_naive_bayes_train,cv_tan_bn_train,
+     cv_naive_bayes_train.new,cv_tan_bn_train.new,
+     xlab=c("NB vorher","TAN vorher",
+            "NB nachher","TAN nachher"),
+     main="Vergleich vor und nach Vereinigung der Zielvariablenausprägungen \n - Klassifizierungsfehler auf Trainingsdaten")
+
+
+```
+
+In der Grafik sind die neuen Modelle mit den alten Modellen gegenübergestellt. Wir können eine deutiche Verbesserung sehen, alle Boxplots auf der rechten Seite sind unterhalb ihrer Vorgänger.
+
+```{r}
+set.seed(42)
+
+#Naive Bayes Classifier
+fitted_naive_bayes2 <- bn.fit(naive_bayes_net2, train2, method = "bayes")
+pred = predict(fitted_naive_bayes2, test2)
+confusionMatrix(pred, reference = test2$Target)
+```
+
+Wir sehen, dass der NB sich leicht gegenüber dem vorherigen Modell verbessert hat. Der Vorgänger hatte insbesondere Probleme \textit{vgood}, \textit{good} und \textit{acc} auseinander zuhalten (hinsichtlich der Sensitivität). Die Modell Vereinfachung zeigt nun deutlich, dass die Sensitivität gestiegen ist.  
+
+```{r}
+set.seed(42)
+
+fitted_tan_bn2 <- bn.fit(tan_bayes_net2, train2, method="bayes")
+pred = predict(fitted_tan_bn2, test2)
+confusionMatrix(pred, reference = test2$Target)
+```
+
+Das angesprochene Problem von NB, existierte beim TAN nicht. Wir sehen durch die Modellvereinfachung dennoch eine leichte Verbesserung in der Modellgüte. Nachfolgend eine Auflistung der Accuracy des multiplen und binären Klassifikationsproblem. Da der Parameter \textit{method} von \textit{bn.fit} zu spät gesichtet wurde, haben wir neben des bayesischen Ansatzes (Bayes) auch die zuvor frequentistischen Modellierungsvarianten (ML) mit protokolliert.
+
+\begin{table}[]
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Modell}      & \textbf{4-Klassen} & \textbf{2-Klassen} & \textbf{Verbesserung} \\ \hline
+\textbf{Naive Bayes (ML)} & 0.8764          & 0.9691           & 0.0927                \\ \hline
+\textbf{TAN (ML)}         & 0.3243          & 0.7027           & 0.3784                \\ \hline
+\textbf{Naive Bayes (Bayes)} & 0.8764          & 0.9691           & 0.0927                \\ \hline
+\textbf{TAN (Bayes)}         & 0.9498          & 0.9768           & 0.027                \\ \hline
+\end{tabular}
+\caption{Überblick Accuracy: Multiples Klassifikationsproblem vs. Binäre Klassifikationsproblem. Gegenüberstellung Maximum Likelihood vs. Maximum A Posteriori}
+\label{tab:vergleich_tanbayes_vorher_nachher}
+\end{table}
+
+In Tab.\ref{tab:vergleich_tanbayes_vorher_nachher} sehen wir, dass die Zusammenlegung der Variablen das Modell vereinfacht. Wodurch wir für NB und TAN bessere Werte erzielen konnten. Interessant ist zu sehen, dass der einfachere Klassifizierer von beiden, daher NB, durch die Datenvereinigung deutliche Verbesserungen erzielt, wohingegen das Bayes Netz beide Fälle vergleichbar gut ist. 
+
+Weiterhin sehen wir aber auch, dass die Bayes Methode zu einer wesentlich besseren Modellgüte geführt hat. 
+
+
+ 
+\subsection{Teilaufgabe b: Modell Visualisierung als Graph }
+\textit{Visualisieren Sie die beiden Ansätze. (ebenfalls mit bnlearn)}
+
+Nun wollen wir uns die gelernten Strukturen einmal genauer betrachten. Hierfür beziehen wir uns wieder auf die zuvor erlernten Multi-Klassen Klassifizierer und vernachlässigen die Netze des binären Klassifizierer.
+
+
+```{r}
+par(mfrow=c(1,2))
+graphviz.compare(naive_bayes_net,tan_bayes_net,main = c("Naive Bayes","Tree-Augmented Naive Bayes"))
+```
+
+In der obigen Grafik sind beide erlernte Netze gegenübergestellt. Wir sehen im linken Plot den Naive Bayes basierenden Ansatz. Target hängt ab von seinen Kinderknotenab. \textbf{Die Pfeilrichtung ist hier zu interpretieren als \textit{ist abhängig von}}. Wir sehen, wie zu erwarten für den NB, dass keine Abhängigkeiten zwischen den Kovariaten vorliegen. Rechts daneben sehen wir TAN. Die rot eingefärbten Pfeile zeigen die zusätzlichen Abhängigkeiten zwischen den Kovariaten auf, welche sich durch den Chow Liu Algorithmus ergeben. 
+
+\subsubsection{Gegenüberstellung eines frequentistischen Modells}
+
+Wir wollen nun einmal ein BN heranziehen, welchen einem frequentischen Ansatzes verfolgt. Dabei führen wir eine klassisch frequentistische Herangehensweise an. Hierzu nutzen wir Bootstapping und schätzen mittels der Methode \textit{Hill Climbing} ein approximatives Modell. Der Algorithmus \textit{Hill Climbing} gehört zu der Familie der score-based Learning Algorithmen. Es handelt sich hierbei um einen \textit{Greedy} Algorithmus, welcher keine Garantie für eine optimale Suche darstellt. Der Algorithmus ist sehr primitiv und betrachtet nur die rechts und linksseitigen Anstieg, so wandert er in ein Maximum und terminiert dort, falls links und rechts keine Verbesserung vorliegen sollte (``Bergspitze''). 
+
+\begin{equation}
+\label{eq:BIC}
+B I C=-2 \ell\left(\tilde{\boldsymbol{\theta}}_{M L}\right)+p \ln (n)
+\end{equation}
+
+Als Informationskriterium wird BIC herangezogen, welche minimal wird genau dann wenn, der Maxiumum Likelihood maximal wird (vgl. Gl. \ref{eq:BIC}). Dabei repräsentiert $\ell(\tilde{\boldsymbol{\theta}}_{M L})$ die Log-Likelihood Funktion über den Maximum-Likelihood Schätzer. Dabei stellt $p$ die Anzahl der Parameter dar, welche mit zunehmendender Anzahl den Strafterm vergrößern.
+
+```{r}
+set.seed(42)
+
+# Frequentist with bootstraping
+strength_arc_freq <- boot.strength(train, algorithm = "hc", algorithm.args = list(score="bic"), R=1000)
+
+
+# Plotting comparison with TAN
+par(mfrow=c(1,2))
+graphviz.plot(tan_bayes_net,main = c("Tree-Augmented Naive Bayes"))
+strength.plot(tan_bayes_net,strength = strength_arc_freq, main="Hill Climbing - Strength Plot (Frequentist) \n Bootstrapping R=1000, \n Informationskriterium = BIC")
+
+
+```
+
+Wir sehen im Vergleich die TAN erzeugte Netzstruktur (links) und Hill-Climbing Modell (HC) des Frequentisten (rechts). Gestrichelte Linien zeigen auf, wo sich das HC vom TAN unterschieden hat. Die Stärke der Linien gibt Aufschluss über die Signifikanz der einzelnen Beziehungen. Dabei ist zu erkennen, dass die Akzeptanz stark von \textit{persons},\textit{maint},\textit{buying} und \textit{safety} beeinflusst wird. Die Beziehung zu \textit{lug\_boot} wurde hingegen seltener beobachtet und nimmt somit weniger Einfluss\footnote{Der Schwellwert für die Berücksichtigung einer Kante lag bei `r attr(strength_arc_freq,"threshold")``}. Wir bilden nun einen Klassifizierer, welcher die ermittelten Kanten des HC Verfahren nun nutzt. 
+
+
+
+
+```{r}
+set.seed(42)
+
+average_hc = averaged.network(strength_arc_freq )
+
+fitted_hc_bn <- bn.fit(average_hc, train, method = "mle")
+pred = predict(fitted_hc_bn, data = test, node = "Target")
+confusionMatrix(pred, reference = test$Target)
+```
+
+Wir haben mit dem HC deutlich schlechtere Werte hinsichtlich der Modellgüte erzielt. Die Klassen \textit{acc} und \textit{unacc} haben bezüglich ihrer Sensitivität hohe Werte erreicht, jedoch konnte \textit{good} und \textit{vgood} nicht erkannt werden. Die Spezifität hingegen liegt bei beiden sehr hoch, was jedoch auf Grund ihrer relativ betrachteten Häufigkeiten im Datensatz nicht verwunderlich ist. Nachträglich betrachten wir noch einmal den Fehler der Kreuz-Validierung.
+
+```{r warning=FALSE}
+cv_hc_bn_train <- bn.cv(train, average_hc, method = "k-fold", 
+                  loss="pred-lw", 
+                  k=10, 
+                  runs=10 ,
+                  fit.args = c(average_hc, train), 
+                  loss.args = list(target = "Target"))
+
+
+cv_hc_bn_test <- bn.cv(test, average_hc, method = "k-fold", 
+                  loss="pred-lw", 
+                  k=10, 
+                  runs=10 ,
+                  fit.args = c(average_hc, train), 
+                  loss.args = list(target = "Target"))
+
+```
+
+```{r}
+plot(cv_tan_bn_train,cv_hc_bn_train,
+     cv_tan_bn_test,cv_hc_bn_test,
+     xlab=c("Train (TAN)","Train (HC)","Test (TAN)","Test (HC)"),
+     main="Vergleich Klassifizierungsfehler \n Klassifizierungsfehler")
+
+```
+
+Wir sehen, dass unser TAN Modell, das frequentitische ermittelte Modell auch hinsichtlich seines mittleren Fehlers schlagen konnte. 
+
+
+
+
+\subsubsection{TAN - Bayes Netz mit Prior - Information}
+
+Wir nehmen nun an, dass wir von einem Experten folgende Aussagen erhalten haben:
+
+\begin{itemize}
+\item Sicherheit wird beeinflusst durch doors, maint und lug\_boot (Annahme: erhöht die Knautschzone)
+\item Die Wartungskosten sind meist teurer, wenn das Auto einen hohen Anschaffungswert besitzt (Annahme: Qualität spiegelt sich im Preis wieder)
+\item Anzahl Türen beeinflusst die Anzahl der Personen, jedoch nicht anders herum (z.B. 4 Sitzer mit 2 Türen).
+\item Der Kaufpreis ist unabhängig von der Anzahl Personen (z.B. Sportwagen).
+\end{itemize}
+
+
+Wir werden nun nachfolgend das Domänen Wissen im Modell umsetzen.
+
+```{r warning=FALSE}
+set.seed(42)
+
+# Specify domain knowledge
+wl <- data.frame(from = c("safety", "safety","safety","maint","persons"), 
+                   to = c("doors", "maint", "lug_boot","buying","doors"))
+
+bl <- data.frame(from=c("buying"),
+                   to=c("persons"))
+
+# TAN Classifier
+prior_tan_bayes_net <- tree.bayes(train, "Target", whitelist = wl, blacklist = bl)
+
+cv_prior_tan_bn_test <- bn.cv(test, prior_tan_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+cv_prior_tan_bn_train <- bn.cv(train, prior_tan_bayes_net, method = "k-fold", loss="pred-lw", k=10, runs=10, fit.args = list(method="bayes"))
+```
+
+
+```{r}
+
+plot(cv_tan_bn_train,cv_prior_tan_bn_train,
+     xlab=c("TAN","TAN prior"), 
+     main="Vergleich des Trainingsfehlers mit und ohne Prior Wissen \n [Bayesian]")
+```
+
+Wir können sehen, dass der Trainingsfehler sich erhöht hat. Unsere Modell passt sich somit noch schlechter an die Daten an.
+
+```{r}
+
+plot(cv_tan_bn_test,cv_prior_tan_bn_test,
+     xlab=c("TAN","TAN prior"), 
+     main="Vergleich des Testfehlers mit und ohne Prior Wissen \n [Bayesian]")
+```
+
+Wir sehen, dass das die Verteilung des Fehlers für das TAN prior Modell weniger Varibilität aufzeigt, als unser Modell ohne Vorwissen.
+Erstaunlich, auch der tatsächliche Fehler konnten wir mit der Hinzunahme des Experten Wissen verringern. Nachfolgend betrachten wir noch die finale Klassifikation auf den Testdaten. 
+
+
+```{r}
+set.seed(42)
+fitted_prior_tan_bn <- bn.fit(prior_tan_bayes_net, train, method="bayes")
+pred = predict(fitted_prior_tan_bn, test)
+confusionMatrix(pred, reference = test$Target)
+```
+
+Die obige Konfusion Matrix zeigt die finale Evaluierung auf den Daten.
+
+\begin{table}[H]
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Metrik}                & \textbf{TAN} & \textbf{TAN prior}  \\ \hline
+\textit{\textbf{Accuracy}}     & 0.9498       & 0.9421                  \\ \hline
+\textit{\textbf{Train-Error}}     & 0.0663 ($\pm$ 0.0052)       &  0.0765 ($\pm$  0.0040)                 \\ \hline
+\textit{\textbf{Test-Error}}     & 0.0899 ($\pm$ 0.0092)       & 0.0903 ($\pm$ 0.0050)          \\ \hline
+\end{tabular}
+\caption{Gegenüberstellung: TAN vs. TAN prior}
+\label{tab:tan_prior_vergleich}
+\end{table}
+
+
+In Tab.\ref{tab:tan_prior_vergleich} haben wir das vorherige Modell mit dem a priori angereichertem Modell verglichen. Die Genauigkeit hat sich im TAN prior Modell leicht verschlechtert, jedoch sehen wir, dass der Fehler der Kreuz-Validierung auf den Test-Daten wie auch auf den Trainingsdaten weniger streut. Man erkennt, dass wir durch das hinzufügen unserer Wissen einen größeren Bias erhalten. Man vergleiche hierzu den Trainingsfehler auf, welcher minimal größer ist als zum Vorgänger Modell ohne Vorwissen, jedoch die einhergehende Streuung auf den Testdaten hierdurch reduziert werden konnte.
+
+
+```{r}
+par(mfrow=c(1,2))
+graphviz.compare(tan_bayes_net, prior_tan_bayes_net,main = c("TAN","TAN prior"))
+```
+Stellt man beide Modelle graphisch gegenüber, so sieht man sehr schön unsere, durch Experten-Wissen angereicherten, Modelle. Die roten Pfeile heben hierbei Beziehungen hervor, welche das Modell auf Grund seiner Zielfunktion vernachlässigt hätte und durch unser Vorwissen hinzugefügt wurde. Die blauen Pfeile spiegeln hingegen stellen das ursprüngliche Modell ohne Vorwissen dar.
+
+
+
+```{r}
+#Interactive Visualization: http://robsonfernandes.net/bnviewer/
+# library(bnviewer)
+# bn.learn.hc = hc(df)
+# 
+# viewer(bn.learn.hc,
+# 	bayesianNetwork.width = "100%",
+# 	bayesianNetwork.height = "80vh",
+# 	bayesianNetwork.layout = "layout_with_sugiyama",
+# 	bayesianNetwork.title="Bayes Net - Car acceptability",
+# 	bayesianNetwork.subtitle = "Test - Interactive Visualization",
+# 	bayesianNetwork.footer = "Visualization by bnviewer"
+# )
+
+```
+
+
+
+\subsection{Teilaufgabe c: Markov Blanket im Bayes Netz}
+\textit{Bestimmen Sie den Markov Blanket der einzelnen Knoten im Bayes Netz.}
+
+Zunächst erläutern wir was man unter einem Markov Blanket versteht. Hierfür betrachten wir die zuvor eingeführten \textbf{local semantics}, welche das Netz als eine Sammlung bedingt unabhängiger Ausdrücke betrachtet. Als Markov Blanket bezeichnet man zu einem gegeben Knoten $X_i$, seine Elternknoten $U_i$, Kinderknoten $Y_i$ und die Elternknoten der Kinderknoten $Zi$. Es gelten insbesondere zwei Aussagen.
+
+
+\begin{enumerate}
+\item Jeder Knoten ist bedingt unabhängig von seinen Nicht-Nachfolgern, falls der Zustand der Elternknoten bekannt ist.
+\item Jeder Knoten ist bedingt unabhängig für alle anderen Knoten, wenn sein Markov Blanket gegeben ist.
+\end{enumerate}
+
+
+Daraus ergeben sich für die \textit{local semantics} folgende bedingte Unabhängigkeiten:
+
+\begin{equation}
+\begin{aligned}
+\mathbf{P}\left(X_i | U_{1, \cdots},\right.&\left.U_{m}, Z_{1 j}, \ldots, Z_{n j}\right)=\\
+&=\mathbf{P}\left(X_i | U_{1}, \ldots, U_{m}\right)
+\end{aligned}
+\label{eq:cptBasedOnParents}
+\end{equation}
+
+
+\begin{equation}
+\begin{aligned}
+\mathbf{P}\left(X_i | U_{1, \cdots,} U_{m}, Y_{1, \cdots}, Y_{n}, Z_{1 j}, \ldots, Z_{n j}\right) &=\\
+=\mathbf{P}(X_i | \text { alle Variablen })
+\end{aligned}
+\end{equation}
+
+
+Diese Bedingungen müssen für jeden Knoten im Netz erfüllt sein, damit die global Semantics erhalten bleiben.
+
+Wir werden diese Knoten nun visualisieren. Hierbei ist der Knoten von Interesse $X_i$ gelb eingefärbt. Wir bezeichnen $U_i$ als $X_i$ Elternknoten und $Y_i$ die Kinderknoten und als $Z_i$ die Eltern der direkten Nachfolgern (Kinderknoten), welche grün eingefärbt sind. 
+
+\textbf{Anmerkung: Die Pfeilrichtung von \textit{bnlearn} repräsentiert die Relation $X_i$ ist abhängig von $X_j$. Daher es existiert die Kante $X_i \to X_j$. In der Vorlesung haben wir jedoch die Relation $X_j$ beeinflusst $X_i$ kenenngelernt, daher $X_j \to X_i$.}
+
+
+\begin{table}[H]
+\begin{tabularx}{16cm}{|X|X|X|X|X|}
+\hline
+\textit{\textbf{$X_i$}}     & \textbf{U}                                       & \textbf{Y}      & \textbf{Z}         & \textbf{Markov}\newline \textbf{Blanket}                          \\ \hline
+\textbf{Target}             & buying, maint, safety, lug\_boot,persons, dooors &                 &                    & buying, maint, safety, lug\_boot,persons, doors \\ \hline
+\textbf{doors}              &                                                  & persons, Target & persons            & persons, Target                                  \\ \hline
+\textbf{maint}              &                                                  & buying, Target  & buying             & buying, Target                                   \\ \hline
+\textit{\textbf{buying}}    & maint, safety                                    & Target          & safety, maint      & maint, safety,Target                             \\ \hline
+\textit{\textbf{safety}}    & lug\_boot, persons                               & buying,Target   & persons, lug\_boot & lug\_boot, persons,buying,Target                 \\ \hline
+\textit{\textbf{lug\_boot}} &                                                  & safety, Target  & safety             & safety, Target                                   \\ \hline
+\textit{\textbf{persons}}   & doors                                            & safety,Target   & safety             & doors,safety,Target                              \\ \hline
+\end{tabularx}
+\caption{Übersicht der identifizierten Markov Blankets des TAN}
+\label{tab:markov_blanket_overview}
+\end{table}
+
+
+In Tab.\ref{tab:markov_blanket_overview} ist eine Zusammenfassung der erfassten Markov Blankets. Nachfolgend wollen wir diese dennoch mal genauer betrachten.
+
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "Target")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=Target", layout = "twopi")
+          
+```
+
+
+```{r}
+
+nodeRenderInfo(g) <- list(col=c("Target" = "yellow"), fill= c("Target" = "yellow"))
+renderGraph(g)
+```
+
+Durch das TAN Verfahren wurde der NB Klassifizier als Grundlage gelegt. Hierdurch ergibt sich, dass \textit{Target} abhängig von all seinen Elternknoten ist $U=$\{\textit{buying},\textit{maint},\textit{safety}, \textit{lugboot}, \textit{persons},\textit{doors}\}. 
+
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "doors")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=doors", layout = "twopi")
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("doors" = "yellow"), fill= c("doors" = "yellow"))
+renderGraph(g)
+```
+
+Das Markov Blanket für \textit{doors} beinhaltet zwei Kinderknoten. Dabei stellt \textit{doors} den Elternknoten zu \textit{persons} und \textit{Target} dar. 
+Zugleich ist jedoch auch \textit{persons} der Elternknoten des Kindes \textit{Target}.
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "maint")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=maint", layout = "twopi")
+
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("maint" = "yellow"), fill= c("maint" = "yellow"))
+renderGraph(g)
+```
+
+Das Markov Blanket für \textit{maint} beinhaltet auch nur zwei Knoten. Dabei ist \textit{maint} der Elternknoten mit \textit{Target} und \textit{buying} als seine Kinderknoten.
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "buying")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=buying", layout = "twopi")
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("buying" = "yellow"), fill= c("buying" = "yellow"))
+renderGraph(g)
+```
+Das Markov Blanket für \textit{buying} beinhaltet 3 Knoten. Dabei ist \textit{buying} hier sowohl zweimal Kind - als auch einmal Elternknoten. Die Knoten \textit{maint} und \textit{safety} sind hierbei die Elternknoten von \textit{buying}. Der Knoten \textit{Target} ist das Kind von \textit{buying}, welches zudem \textit{maint} und \textit{safety} als Elternknoten hat.
+
+
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "safety")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=safety", layout = "twopi")
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("safety" = "yellow"), fill= c("safety" = "yellow"))
+renderGraph(g)
+```
+Betrachten wir nun \textit{safety} hier haben wir nun 4 Knoten im Markov Blanket. Zunächst identifizieren wir die Elternknoten von \textit{safety}. Diese sind \textit{lugboot} und \textit{persons}. Kinderknoten von \textit{safety} sind \textit{Target} und \textit{buying}, wobei \textit{buying}, \textit{lugboot} und \textit{persons} auch Elternknoten des Kindes \textit{Target} widerspiegeln.    
+
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "lug_boot")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=lug_boot", layout = "twopi")
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("lug_boot" = "yellow"), fill= c("lug_boot" = "yellow"))
+renderGraph(g)
+```
+Das Markov Blanket für \textit{lugboot} besteht aus zwei Knoten \textit{safety} (Kind, Elternknoten von \textit{Target}) und \textit{Target} (Kind).
+
+
+```{r include=FALSE}
+markov_blanket_temp <- mb(tan_bayes_net, "persons")
+
+g <- graphviz.plot(tan_bayes_net, 
+              highlight = list(nodes=markov_blanket_temp, fill="green", col="yellow"),
+              main="Markov Blanket für Knoten=persons", layout = "twopi")
+```
+
+
+```{r}
+nodeRenderInfo(g) <- list(col=c("persons" = "yellow"), fill= c("persons" = "yellow"))
+renderGraph(g)
+```
+
+Letztlich bleibt noch das Markov Blanket zu \textit{persons} zu betrachten. Der Elternknoten ist \textit{doors}, welcher jedoch auch Elternknoten von \textit{Target} ist. Des Weiteren ist \textit{safety} der Elternknoten von Target, wobei \textit{Target} und \textit{safety} die Kinderknoten von \textit{persons} sind.
+
+ 
+\subsection{Teilaufgabe d: Interpretation der Ergebnisse}
+\textit{Interpretieren Sie ihre Ergebnisse.}
+
+Wir konnten feststellen, dass die erlernte Struktur des Bayes Netz, neben der Klassifikation, uns auch Einblicke in die erlernten Abhängigkeiten geben konnte, welche jedoch vom jeweiligen Verfahren abhängig waren. Dabei zeigen Bayes Netze eine sehr gute Möglichkeit Abhängigkeiten innerhalb eines Systems zu modellieren. Wir haben die gemeinsame Verteilung des Ausgangsszenarios modellieren können und wollen uns nun im letzten Teil nochmal auf die resultierenden bedingten Wahrscheinlichkeitsverteilungen einzelner Variablen konzentrieren. 
+
+\subsection{Interpretation Buying}
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$Target,
+                main="Target: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(Target)",
+                ylab="Target")
+```
+
+Wir sehen, dass die in \textit{bnlearn} implementierte Bedingte Wahrscheinlichkeitstabellen je Knoten, jeweils die Zielklasse als Wurzelknoten setzen. Wodurch wir die bedingte Wahrscheinlichkeitsverteilung über \textit{Target} selbst bekommen $P(Target | Target) = P(Target)$. 
+
+
+\subsubsection{Interpretation Buying}
+
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$buying,
+                main="Buying: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(buying | Target)",
+                ylab="Buying")
+```
+
+Wir sehen hier die bedingte Wahrscheinlichkeitsverteilung über \textit{Buying} gegeben \textit{Target}. Es fällt auf, dass eine sehr hohe Akzeptanz (\textit{good}, \textit{vgood}) vorliegt (gegeben), wenn der Preis des Autos \textit{low} oder \textit{med} ist. 
+
+
+
+
+
+\subsubsection{Interpretation maint}
+
+
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$maint,
+                main="Maint: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(maint| Target, buying)",
+                ylab="maint")
+```
+
+```{r}
+fitted_tan_bn$maint$parents
+```
+
+
+```{r}
+mb(tan_bayes_net, "maint")
+```
+
+
+
+
+\subsubsection{Interpretation Persons}
+
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$persons,
+                main="Persons: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(persons | Target, safety)",
+                ylab="Persons")
+```
+
+```{r}
+fitted_tan_bn$persons$parents
+```
+
+
+
+
+\subsubsection{Interpretation Lug\_boot}
+
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$lug_boot,
+                main="Lug_boot: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(lug_boot | Target, doors, safety)",
+                ylab="lug_boot")
+```
+
+```{r}
+fitted_tan_bn$lug_boot$parents
+```
+
+
+
+
+\subsubsection{Interpretation doors}
+
+```{r}
+bn.fit.barchart(fitted = fitted_tan_bn$doors,
+                main="Doors: Bedingte Wahrscheinlichkeitsverteilung (TAN)",
+                xlab="P(doors|Target,maint,safety)",
+                ylab="doors")
+```
+
+```{r}
+fitted_tan_bn$doors$parents
+```
+
+
+
+
+
+
+
+
+
+\subsubsection{Hohe Sicherheit erhöht die Akzeptanz}
+\textbf{TBD-----------------------------------}
+
+
+
+```{r include=TRUE}
+set.seed(42)
+a <- cpquery(fitted = fitted_tan_bn,  
+        event = (safety == "high"), 
+        evidence = (persons == "4") & (lug_boot =="big"))
+```
+
+
+Unter der Bedingung, dass es sich um ein viertüriges Auto handelt, einen großen Gepäckraum besitzt und mehr als 4 Leute Platz in diesem Auto haben, 
+so liegt die bedingten Wahrscheinlichkeit, dass das Auto mit einer hohen Sicherheitseinstufung versehen wird bei 0.3494898. Das bedeutet im Umkehrschluss, dass es zu einer `r 1-0.3494898` nicht als Sicherheitseinstufung nicht als \textit{low} eingestuft wird. Es fällt jedoch auf, dass die Wahrscheinlichkeiten relativ gleichverteilt sind. Wir wissen, dass die A posterori Warhscheinlichkeit sich immer mehr der a priori Wahrscheinlichkeit annährt je weniger Beobachtungen vorliegen. 
+
+\begin{itemize}
+\item $P(safety=low|persons=4,lugboot=big)=0.3069728$
+\item $P(safety=med|persons=4,lugboot=big)=0.3435374$
+\item $P(safety=high|persons=4,lugboot=big)=0.3494898$
+\end{itemize}
+
+
+
+
+
+\subsubsection{Offene Punkte:}
+
+\begin{itemize}
+\item Erwartungshaltung der Interpretation? CP-Query? CPT? CPT Chart?
+\item graphviz.chart -> funktioniert nicht? Falls gewünscht, wie bringe ich es zum laufen?
+\item Pfeilrichtungen sind umgedreht (laut Anmerkung Kommilitone und Prof), wenn dem so sei, was sagen mir dann bn.fit.barchart(): 'plot the probabilities in the conditional probability table associated with each node.'. Das entspricht doch P(X| Parents(X)). Implementierung zeigt von Target auf leere Menge. Widerspruch zur Annahme (umgekehrte Richtung). Ggf. vgl. Oxford Slides Literatur. 
+\item Verständnis Frage: TAN lediglich Algorithmus für MWST. Max vom IG. Das strukturelle Lernen ist somit weder frequentist noch bayesian, korrekt? Wir haben weder Konfidenzintervalle noch Kredibilität. Paramterschätzung gegeben des Graphes jedoch wieder Bayesian Style (wie kann ich mir das generative Modell hier vorstellen?)
+\end{itemize}
+
+
+\newpage
+
+
+

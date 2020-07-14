@@ -1,0 +1,315 @@
+---
+title:
+output: 
+  pdf_document:
+    latex_engine: lualatex
+documentclass: article
+geometry: 'top=30mm, bottom=30mm, inner=20mm, outer=20mm'
+fontsize: '11pt'
+mainfont: 'Source Serif Pro'
+sansfont: 'Source Sans Pro'
+monofont: 'Source Code Pro'
+header-includes: 
+- '\usepackage{fontspec}'
+- '\usepackage{unicode-math}'
+- '\usepackage{polyglossia}'
+- '\setdefaultlanguage[spelling=new, babelshorthands=true]{german}'
+- '\usepackage{csquotes}'
+- '\usepackage{fancyhdr}'
+- '\usepackage{dsfont}'
+- '\pagestyle{fancy}'
+- '\setlength{\headheight}{14pt}'
+- '\fancyhead[C,C]{}'
+- '\fancyhead[L]{}'
+- '\fancyhead[R]{}'
+- '\fancyfoot[C,C]{\thepage}'
+- '\renewcommand{\footrulewidth}{0.4pt}'
+- '\newcommand{\argmin}{\operatorname{arg}\min}'
+- '\newcommand{\R}{\mathds{R}}'
+---
+
+<style type="text/css">
+body{
+  font-size: 12px;
+}
+h1 {
+  font-size: 18px;
+}
+h1 {
+  font-size: 14px;
+}
+h1 {
+  font-size: 12px;
+}
+</style>
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=TRUE,     # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = '#>',    # change comment character
+                      fig.align = 'center',
+                      fig.width = 10,     # set figure width
+                      out.width = '100%', # set width of displayed images
+                      warning=FALSE,      # show R warnings
+                      message=FALSE)     # show R messages
+```
+
+<!---** Hochschule Darmstadt | Studiengang Data Science | Wintersemester 2019 **--->
+
+```{r, echo=FALSE, warning=FALSE}
+set.seed(42)
+usepackage = function(package_name) 
+{
+  p = deparse(substitute(package_name))
+  if (!is.element(p, installed.packages()[,1]))
+    install.packages(p, dep = TRUE)
+  require(p, character.only = TRUE)
+}
+```
+
+\section{Praktikum 2: EM-Algorithmus}
+
+```{r, echo=FALSE}
+library(knitr)
+library(ggplot2)
+library(plyr)
+library(gridExtra)
+library(EMCluster)
+library(cluster)
+
+load("data/maus.RData")
+df = maus[c(1,2)]
+
+silhouette_score <- function(df, clusters){
+  ss <- silhouette(clusters, dist(df))
+  sdist = abs(ss[, 3])
+  sc = mean(sdist)
+  out = list(sc, sdist)
+  names(out) = c("sc", "sdist")
+  return(out)
+}
+```
+
+Zuerst schauen wir uns die Daten an. Es handelt sich um X und Y Koordinaten im Intervall $[0;1]$, darüberhinaus wird jeder Koordinate eine Klasse zugewiesen, welche entweder \textit{Kopf}, \textit{Linkes Ohr} oder \textit{Rechtes Ohr}. 
+Durch einen einfachen Scatterplot wird klar, warum der Datensatz den Namen "maus" trägt. Wir werden im nachfolgenden auf die Achsen der graphischen Darstellung verzichten, womit mir uns vielmehr auf die strukturellen Gegebenheiten des Plots beziehen.
+
+```{r, fig.width=5, fig.height=4,echo=FALSE}
+gg = ggplot(
+  maus,
+  aes(x, y))
+gg + geom_point(size = 2, color = "black")  + theme_void() + theme(legend.position="top", legend.title = element_blank())
+```
+
+\clearpage
+Im nächsten Schritt schauen wir und auch die Klassenverteilung an.
+
+```{r, fig.width=5, fig.height=4, echo=FALSE}
+gg = ggplot(
+  maus,
+  aes(x, y, color=class))
+gg = gg + geom_point(size = 2)
+gg = gg + scale_color_manual(
+  values=c("Kopf" = "black", "Linkes Ohr" = "#0099cc", "Rechtes Ohr" = "#9999ff"))
+gg = gg + theme_void() + theme(legend.position="top", legend.title = element_blank())
+gg
+```
+
+Wir sehen sehen die absoluten Häufigkeiten der Klassen, womit wir einen ersten Eindruck über die Klassenverteilung erhalten.
+
+```{r, echo=FALSE}
+n_kopf = sum(maus$class == 'Kopf')
+n_lohr = sum(maus$class == 'Linkes Ohr')
+n_rohr = sum(maus$class == 'Rechtes Ohr')
+sums = c(n_kopf, n_lohr, n_rohr)
+names = c('Kopf', 'Linkes Ohr', 'Rechtes Ohr')
+dfs = data.frame('Klasse'=names, 'Summe'=sums)
+kable(dfs, caption = 'Datenverteilung')
+```
+
+Wir stellen fest, dass der Schnitt der knovexen Hüllen der Ohren mit dem Kopf nicht leer ist. Da sowohl \textit{k-Means} als auch EM jedem Punkt nur eine Klasse zuweisen und Überschneidungen der konvexen Hüllen vermeiden, sorgt dies direkt für einen gewissen unvermeidbaren Fehler. Auch nach Augenmaß und der Tabelle 1 ist festzustellen, dass die Dichte der Datenpunkte in den Ohren jeweis höher als im Kopf ist.
+
+\clearpage
+Nun berechnen wir ein Clustering mittels \textit{k-means}-Algorithmus.
+In der linken Grafik sieht man einen Scatterplot des Clusterings und in der rechten Grafik einen Scatterplott mit Klassifizierung nach "TRUE" und "FALSE". Daher je nachdem, ob der Algorithmus richtig klassifiziert hat.
+
+```{r, fig.width=10, fig.height=5, echo=FALSE}
+set.seed(42)
+# create a \textit{k-Means} clustering with 3 initial centroids
+cl = kmeans(df, 3)
+sc = silhouette_score(df, cl$cluster)
+sc = round(sc$sc, 3)
+sckm = sc
+class = as.factor(cl$cluster)
+dfc = cbind(df, class)
+colnames(dfc) = c('x', 'y', 'class')
+
+linkes_ohr = dfc[which.min(dfc$x),]$class
+rechtes_ohr = dfc[which.max(dfc$x),]$class
+kopf = dfc[which.min(dfc$y),]$class
+class = mapvalues(class, from = c(kopf,linkes_ohr,rechtes_ohr), to=c(1, 2, 3))
+class = mapvalues(class, from = c(1,2,3), to=c('Kopf', 'Linkes Ohr', 'Rechtes Ohr'))
+dfc$class = class
+
+same_class = as.factor(class == maus$class)
+n_true = sum(same_class == TRUE)
+n_false = sum(same_class == FALSE)
+acc = n_true / (n_true + n_false)
+acc = round(acc, 3)
+acckm = acc
+dfsc = cbind(df, same_class)
+colnames(dfsc) = c('x', 'y', 'class')
+
+gg1 = ggplot(
+  dfc,
+  aes(x, y, color=class))
+gg1 = gg1 + geom_point(size = 2)
+gg1 = gg1 + scale_color_manual(
+  values=c("Kopf" = "black", "Linkes Ohr" = "#0099cc", "Rechtes Ohr" = "#9999ff"))
+gg1 = gg1 + theme_void() + theme(legend.position="top", legend.title = element_blank())
+ggkm1 = gg1
+
+gg2 = ggplot(
+  dfsc,
+  aes(x, y, color=class))
+gg2 = gg2 + geom_point(size = 2) 
+gg2 = gg2 + scale_color_manual(
+  values=c("TRUE" = "#33cc33", "FALSE" = "#cc3300"))
+gg2 = gg2 + theme_void() + theme(legend.position="top", legend.title = element_blank())
+ggkm2 = gg2
+grid.arrange(gg1, gg2, ncol=2, bottom=paste("Accuracy=", acc, "\nSilhouette-Coefficient=", sc))
+```
+
+Wir erhalten eine Genauigkeit von $`r acc`$. Was man direkt sehen kann ist, dass \textit{k-Means} Punkte gleichmäßig Centroiden nach der euklidischen Distanz zuweist. Dadurch werden einige Punkte des Kopfes falsch zugewiesen, dafür sämtliche Punkte der Ohren korrekt klassifiziert. Das Ergebnis ist in Ordnung, aber nicht besonders gut.
+
+\clearpage
+Nun berechnen wir ein Clustering mittels EM-Algorithmus.
+In der linken Grafik sieht man einen Scatterplot des Clusterings und in der rechten Grafik einen Scatterplott mit Klassifizierung nach "TRUE" und "FALSE" je nachdem, ob der Algorithmus richtig klassifiziert hat.
+
+```{r, fig.width=10, fig.height=5, echo=FALSE}
+set.seed(42)
+# create an em clustering with 3 initial centroids
+emobj = simple.init(df, nclass=3)
+cl = emcluster(df, emobj, assign.class = TRUE)
+sc = silhouette_score(df, cl$class)
+sc = round(sc$sc, 3)
+scem = sc
+class = as.factor(cl$class)
+dfc = cbind(df, class)
+colnames(dfc) = c('x', 'y', 'class')
+
+linkes_ohr = dfc[which.min(dfc$x),]$class
+rechtes_ohr = dfc[which.max(dfc$x),]$class
+kopf = dfc[which.min(dfc$y),]$class
+class = mapvalues(class, from = c(kopf,linkes_ohr,rechtes_ohr), to=c(1, 2, 3))
+class = mapvalues(class, from = c(1,2,3), to=c('Kopf', 'Linkes Ohr', 'Rechtes Ohr'))
+dfc$class = class
+
+same_class = as.factor(class == maus$class)
+n_true = sum(same_class == TRUE)
+n_false = sum(same_class == FALSE)
+acc = n_true / (n_true + n_false)
+acc = round(acc, 3)
+accem = acc
+dfsc = cbind(df, same_class)
+colnames(dfsc) = c('x', 'y', 'class')
+
+gg1 = ggplot(
+  dfc,
+  aes(x, y, color=class))
+gg1 = gg1 + geom_point(size = 2)
+gg1 = gg1 + scale_color_manual(
+  values=c("Kopf" = "black", "Linkes Ohr" = "#0099cc", "Rechtes Ohr" = "#9999ff"))
+gg1 = gg1 + theme_void() + theme(legend.position="top", legend.title = element_blank())
+ggem1 = gg1
+
+gg2 = ggplot(
+  dfsc,
+  aes(x, y, color=class))
+gg2 = gg2 + geom_point(size = 2) 
+gg2 = gg2 + scale_color_manual(
+  values=c("TRUE" = "#33cc33", "FALSE" = "#cc3300"))
+gg2 = gg2 + theme_void() + theme(legend.position="top", legend.title = element_blank())
+ggem2 = gg2
+grid.arrange(gg1, gg2, ncol=2, bottom=paste("Accuracy=", acc, "\nSilhouette-Coefficient=", sc))
+```
+
+Wir erhalten eine Genauigkeit von $`r acc`$. Was man direkt sehen kann ist, dass die Zuweisung der Klassen visuell deutlich besser als bei \textit{k-Means} ist. In Zahlen erkennt man das auch daran, dass die Genuigkeit höher ist.
+Da der EM-Algorithmus anhand der bedingten Wahrscheinlichkeit klassifiziert wird nochmals klar, dass die Dichte der Datenpunkten in der Ohren jeweils höher als beim Kopf ist und der EM-Algorithmus deswegen ein besseres Ergebnis liefert.
+
+
+\clearpage
+
+Als Ergebnis erhalten wir, dass der EM-Algorithmus ein besseres Ergebnis liefert.
+
+```{r, echo=FALSE}
+algos = c('kmean', 'em')
+accs = c(acckm, accem)
+scs = c(sckm, scem)
+dfr = data.frame('Algorithmus'=algos, 'Genauigkeit'=accs, 'Silhoutte-Koeffizient'=scs)
+kable(dfr, caption = 'Ergebnisse')
+```
+
+Der Silhoutte-Koeffizient ist nach seiner Definition von der Clusteranzahl unabhängig, aber abhängig davon wie viele Punkte in den einzelnen Clustern liegen und wie scharf diese voneinander getrennt sind. Der Koeffizient wird genutzt, um bei Algorithmen, die mit unterschiedlichen Startpunkten zu unterschiedlichen lokalen Maxima laufen können, das Clustering zu bewerten. Sprich umso höher der Silhouetten-Koeffizient, umso stärker sind die Cluster strukturiert und umso schärfer sind diese getrennt.
+Dies ist bei beiden Algorithmen der Fall und man könnte den Koeffizienten dafür nutzen die Parameter für das jeweilige Clustering zu optimieren. Man bedenke jedoch, dass der Silhoutten-Koeffizient auch auf der euklidische Distanz basiert, wodurch die Anwendung auf den EM-Algorithmus damit nicht so viel Sinn ergibt. Dies liegt daran, dass für die Maßzahlen jeweils unterschiedliche Maße vorliegen. Deswegen bietet sich zum Vergleich zwischen diesen Algorithmen eher die Genauigkeit an.
+
+\clearpage
+
+\subsection*{Zusammenfassung der Plots als Gesamtergebnis}
+
+Die Plots auf der linken Seite gehören zum \textit{k-Means}-Algorithmus und die auf der rechten Seite vom EM-Algorithmus.
+
+```{r, fig.width=12, fig.height=10, echo=FALSE}
+grid.arrange(ggkm1, ggem1, ggkm2, ggem2, ncol=2, nrow=2)
+```
+
+```{r, fig.width=6, fig.height=5, echo=FALSE, include=FALSE}
+#  der plot ist nicht wirklich gut -> weglassen
+set.seed(42)
+emobj = simple.init(df, nclass=3)
+clem = emcluster(df, emobj, assign.class = TRUE)
+scem = silhouette_score(df, clem$class)
+print(paste("Silhouetten-Koeffizient (em): ", round(scem$sc, 3)))
+
+set.seed(42)
+clkm = kmeans(df, 3)
+sckm = silhouette_score(df, clkm$cluster)
+print(paste("Silhouetten-Koeffizient (k-Means): ", round(sckm$sc, 3)))
+
+dfscem = data.frame(y=scem$sdist)
+dfscem$x = row.names(dfscem)
+dfsckm = data.frame(y=sckm$sdist)
+dfsckm$x = row.names(dfsckm)
+
+gg = ggplot()
+gg = gg + geom_point(data = dfscem, aes(x=x, y=y), color = 'red')
+gg = gg + geom_point(data = dfsckm, aes(x=x, y=y), color = 'blue')
+gg = gg + theme(
+  axis.title.x=element_blank(),
+  axis.text.x=element_blank(),
+  axis.ticks.x=element_blank())
+gg
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

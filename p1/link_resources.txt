@@ -1,0 +1,7 @@
+# Additional Resources
+
+# BNLearn Tutorial
+
+1. Definition nochmal beleuchten bzw. anwenden auf unseren Case
+2. Eingehen auf Learning : (structuring / parameter)
+http://www.bnlearn.com/examples/useR19-tutorial/

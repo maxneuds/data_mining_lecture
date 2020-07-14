@@ -1,0 +1,532 @@
+---
+title: "Praktikum 3:  Convolutional Neural Networks"
+author: "Mike Siefert, Maximilian Neudert"
+date: 
+output: 
+  pdf_document:
+    includes:
+      in_header: config.sty
+          
+
+
+documentclass: article
+<!---output: beamer_presentation--->
+---
+
+
+
+
+
+<!--- Below are global settings for knitr. You can override any of them by adding the changes to individual chunks --->
+
+```{r package_options, include=FALSE, eval=TRUE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=TRUE,     # collapse by default
+                      echo=FALSE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 7,     # set figure width
+                      out.width = "100%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=FALSE)     # show R messages
+```
+
+
+
+<!--- Solution Region --->
+<style>
+#solution {
+  background-color: #8FBC8F;
+  border-style: solid;
+  border-color: blue;
+  margin-left: 20px;
+  margin-bottom: 15px;
+  padding: 5px;
+}
+</style>
+
+
+
+\section{Praktikum 3: Convolutional Neural Networks}
+
+
+\subsubsection{Einleitung: Überblick der Problemstellung}
+
+In diesem Praktikum sollen Kleidungsstücke klassifiziert werden. Der Datensatz \textit{Fashion-MNIST} stellt die Datengrundlage für die Mode Artikel in Form von Bildern dar. Dabei besteht jedes Bild aus einem 28x28x1 Grid von Pixeln. Jedes Pixel nimmt dabei Werte zwischen 0 (schwarz) und 255 (weiß) an. Die Bilder liegen somit in schwarz weiß vor. Der Datensatz stellt somit stark vereinfachte Bilder dar, da herkömmliche Bilder in Farbe sind und in einer deutlich höheren Auflösung vorliegen. Nehmen wir hierzu beispielsweise neuere Smartphones, welche 12 Megapixel\footnote{1 Megapixel entspricht 1.000.000 Pixel. Bei einem quadratischen Bild ergibt sich somit ein Raster von ca. 3464x3464 Pixeln.} Bild-Auflösungen bereitstellen.
+Hinzu kommt noch der farbliche Aspekt, welcher jedem Pixel 3 Dimensionen zuordnet. Diese 3 Dimensionen repräsentieren den Farbraum innerhalb eines Pixels, welche auch als RGB Werte (Rot-Grün-Blau, engl. Red-Green-Blue) bezeichnet werden. 
+
+Um ein Bild in einem einfachen neuronalen Netz verarbeiten zu können, müssen die Daten zunächst in eine passende Form gebracht werden. Hierzu wird das Raster auf einen 1-dim Vektor reduziert, welcher nun für ein Bild aus dem \textit{Fashion-MNIST} Datensatz die Dimension (784,1) besitzt. Ziehen wir ein einfaches Neuronales Netz heran (nachfolgend als FC bezeichnet, engl. Fully Connected) und verbinden den Input Layer mit dem 1-Hidden Layer so ergeben sich für 100 Hidden Neuronen 78.400 Gewichte. Vergleichen wir nun ein herkömmliches Bild eines Smartphones, so ergibt sich bei einem Grid von 3464x3464x3 Werten ein Vektor mit einer Dimension von (35.997.888, 1). In Verbindung mit dem vorher illustrieren FC ergeben sich somit 3.599.788.800 Parameter, welche es zu optimieren gilt und mit einem erhöhten Rechenaufwand einhergeht. Dies entspricht für ein Bild eine Laufzeitkomplexität von $O(m \cdot n)$ für ein 1-Layer FC mit $m$ Input Neuronen und $n$ Output Neuronen.
+
+
+
+Eine Abhilfe für dieses Problem stellen die sogenannten \textit{\textbf{Convolutional Neuronal Networks}} (CNN) dar. Der Begriff \textit{Convolution} bedeutet zu deutsch Faltung. Diese \textit{Convolution} stellt eine mathematische Operation dar, welche es zudem ermöglicht Bilder in ihrer zweidimensionalen Pixel-Ebene als auch in der dritten farblichen Dimension als Input zu erfassen. Letztlich ist ein CNN ein einfaches neuronales Netz, welches statt einer Matrizenmultiplikation in mindestens einem Layer eine \textit{Convolution} Operation durchführt. Die Grundidee besteht darin, dass eine elementweise Matrizenmultiplikation zwischen einem Bild $W$ mit einem Filter $F$ (auch Kernel bezeichnet) schrittweise durchgeführt wird, wodurch die elementweise Matrizenmultiplikation für jeden Schritt in allen Dimensionen den Filter anwendet. Das Resultat $S$ dieser Operation ist selbst wieder eine Matrix (vgl. Gl. \ref{eq:convolution}).
+
+\begin{equation}
+S(i, j)=(F * W)(i, j)=\sum_{m} \sum_{n} W(i-m, j-n) F(m, n)
+\label{eq:convolution}
+\end{equation}
+
+
+Ziel des Lernen ist es die Werte (Gewichte) des Filters anzupassen, sodass die Fehlerfunktion mittels Gradient Descent Verfahren minimiert wird. \textit{Convolutions} adressieren insbesondere folgende Verbesserungen.
+
+\begin{enumerate}
+  \item Sparse interactions
+  \item Parameter Sharing
+  \item Equivariant representations
+\end{enumerate}
+
+(1) Wir haben gesehen, dass ein herkömliches FC eine Vielzahl von zu optimierenden Parametern hervorbringt, welche Zusammenhänge zwischen Input, Hidden und Output Schicht beschreiben. Innerhalb eines Bildes liegen jedoch oftmals gleiche Strukturen direkt zusammen. Diese Idee nutzt die Convolution Operation. Mit der Festlegung der Filter lassen sich somit die Gewichte reduzieren, indem die Anzahl des Filters $F$ kleiner als die Anzahl der Input Neuronen $W$ gewählt wird ($F<W$). Diese werden auch als ``Sparse Weights'' bezeichnet. 
+
+(2) Unter ``Parameter sharing'' versteht man, dass mittels der Convolution Operation Filter und somit auch die Gewichte, geteilt werden. Während das FC für jedes Neuron eine Vielzahl an Gewichten trainiert (gegeben durch den Bipartiter Graph, daher auch Fully Conntected). Traniert das CNN hingegen nur eine Menge an Gewichte (gegeben durch den Filter). Dies hat insbesondere einen Effekt auf die Speicherbedarf, da lediglich die $k$ Parameter des Filtern allokiert werden müssen. Man beachte jedoch, dass dies nicht die Laufzeit beim Feed-Forward Propagation beeinflusst, womit die Laufzeitkomplexität bei $O(k \cdot n)$ bestehen bleibt.
+
+(3) Eine besondere Stärke des Operators ist, dass es sich hierbei um eine äquivarianten Abbildung handelt. Das bedeutet, dass erlernte Bildelemente übertragbar sind. Daher erlernte Strukturen lassen sich transferrieren ohne das diese an exakt jener Stelle im Bild erlernt wurden. 
+
+CNN bestehen meist aus einer Abfolge mehrerer Convolutions, welche eine Menge linearer Aktivierungen (engl. activation maps) repräsentieren. Ähnlich wie im klassischen FC werden auf diese linearen Aktivierungen eine nicht-lineare Funktion (z.B. ReLu, Tanh, Softmax, etc.) angewendet. Es sei angemerkt, dass GPUs diese Operationen parallel durchführen können und so für einen höheren Durchsatz sorgen können. 
+
+Insbesondere für die Verarbeitung von Bildern hat sich die ReLu als besonders effektiv erwiesen. Da sich der Wertebereich von 0 bis 255 erstreckt würden negative Aktivierungen schwarz eingefärbt werden. Ein weiterer Vorteil liegt im Lernprozess durch das Gradient Descent Verfahren. Der Gradient einer Sigmoid - oder Tanh - Funktion läuft für zunehmend große Werte gegen 0, wodurch das Lernen stark verlangsamt wird, wodurch die ReLu - Funktion das Lernen effizienter macht. 
+
+Nach der nicht-linearen Aktivierung wird in CNN meist noch ein Pooling Layer angewendet. Pooling, zu deutsch Vereinigung, beabsichtigt die Auswahl eines geeigneten Repräsentaten für eine Menge von Aktivierungen. Hierbei wird ähnlich wie bei der Faltung, das Pooling schrittweise ermittelt. Im Gegensatz zu den Convolution Filtern, werden hier keine Parameter optimiert. Dieser Layer ermöglicht das Transformationen (z.B. Rotationen des Bildes) zur gleichen Aktivierung führen, womit die Abbildung invariant wird. Darüberhinaus werden die Anzahl der vorhanden Parameter, mit einhergehender Robustheit der Aktivierungen, reduziert. Abhängig von der Größe des Pooling-Layers wird die Anzahl der repräsentativen Aktivierungen bestimmt. Darüberhinaus lassen sich unterschiedliche Transformation für die Dimensionsreduktion anzuwenden. Neben dem Max-Pooling, welches immer die Aktivierung als Repräsentant mit dem größten Wert wählt (hellster Pixel), so wird der Repräsentant des Average-Pooling über den Mittelwert aller betrachteten Aktivierungen gebildet. Während Convolution Kanten, beliebiger Richtungen, identifiziert, so sorgt Pooling für eine deutlichere Repräsentation dieser Kanten.
+
+Wir haben sowohl für das Pooling als auch für die Convolution erläutert, dass diese schrittweise die vorhandenen Merkmale (Bildelemente) betrachten. Hierdurch werden insbesondere Randbereiche weniger ins Gewicht genommen als Bildelemente innerhalb eines Bildes. Eine Möglichkeit hierfür stellt das sogenannte Padding da, welches den Randbereich künstlich vergrößert und so Randpixel gleichermaßen ins Gewicht nimmt. Ein weiterer Vorteil, welches die Nutzung von Padding bezweckt ist, dass man hierdurch die leichte Reduktion ($n-k+1$) durch die Convolution entgegen wirken kann, wodurch die Größe identisch zur Input Größe ist. Analog ergibt sich hieraus, dass eine Verkleinerung die Anzahl für nachfolgende Schichten verkleinert. Eine Möglichkeit hiefür bezeichnet das sogenannte Striding, welches die Raster Verschiebung (d.h. Anwendung des Filters auf die nächste Bildpartie) bestimmt. Je größere die Schritte gewählt werden, desto kleiner ist die Dimension der Aktivierung. 
+
+
+\begin{itemize}
+  \item W: Input Volumen Größen
+  \item P: Anzahl des Padding-Größe
+  \item F: Anzahl der Filter-Größe
+  \item S: Anzahl für nächste Raster Verschiebung
+\end{itemize}
+
+
+
+\begin{equation}
+  \left\lfloor \frac{W+2P-F}{S}+1 \right\rfloor
+\label{eq:dimension}
+\end{equation}
+
+
+Aus den vorherigen Überlegungen ergibt sich Gl.\ref{eq:dimension}, welche die resultierende Output Dimension stark von den anzuwendenden Operationen abhängig macht. Es sei noch angemerkt, dass die Anzahl der Filter frei gewählt werden kann. Die Anzahl der angewendeten Filter bezweckt, dass die Anzahl der ``Activation Maps'' steigt, wodurch natürlich auch die Anzahl zu optimierender Parameter sich erhöht. Jedoch mehrere Details eines Bildes erfasst werden können. 
+
+Betrachtet man den vorwärts Propagation, so werden in weiter vorne liegenden Ebenen kleinere Strukturen wie Kanten erkannt. Mit zunehmender Tiefe des Netzes bilden, werden diese Fragmente zusammengesetzt und ergeben komplexere Fragmente. Dies führt dazu, dass CNN - Architekturen meist eine abnehmende Anzahl an Pixeln durch das Netz annehmen und je tieferen Ebenen zusätzliche Filter sich wiederfinden.  
+
+
+Nachdem wir uns mit einigen Vorzügen CNN vertraut gemacht haben, wollen wir diese nun auf den \textit{Fashion-MNIST} anwenden. 
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|
+>{\columncolor[HTML]{EFEFEF}}l |l|}
+\hline
+\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} \textbf{Klasse}} & \cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} \textbf{Beschreibung}} \\ \hline
+0                                                              & T-Shirt / Top                                                        \\ \hline
+1                                                              & Hosen                                                                \\ \hline
+2                                                              & Pullover                                                             \\ \hline
+3                                                              & Kleid                                                                \\ \hline
+4                                                              & Mantel                                                               \\ \hline
+5                                                              & Sandelen                                                             \\ \hline
+6                                                              & Hemd                                                                 \\ \hline
+7                                                              & Turnschuhe                                                           \\ \hline
+8                                                              & Tasche                                                               \\ \hline
+9                                                              & Stiefel                                                              \\ \hline
+\end{tabular}
+\caption{Integer Encoding: MNIST Datensatz Zielvariable}
+\label{tab:mnist_class}
+\end{table}
+
+In Tabelle \ref{tab:mnist_class} sehen wir die vorhanden Zielklassen. Wir erkennen zunächst, dass die Zielklasse mittels einer Integer Kodierung gekennzeichnet wurde. Dabei sind insgesamt 10 Kleidungsstücke im Datensatz vorhanden. Es liegt bereits ein Trainings-Test Daten Split vor. Insgesamt enthält \textit{Fashion-MNIST} 70.000 Bilder, wovon 60.000 Bilder Trainingsdaten repräsentieren und 10.000 Bilder unseren Testdatensatz für die finale Modell Evaluierung.
+
+Die Klassen sind gleichverteilt, weshalb wir Evaluationskriterium die Genauigkeit (Accuracy) heranziehen.
+
+```{r}
+# Default CPU
+#devtools::install_github("rstudio/keras")
+#install_keras()
+
+# GPU 
+#library(tensorflow)
+#install_keras(tensorflow = "gpu")
+
+#library(keras)
+#install_keras(tensorflow = "gpu")
+```
+
+
+
+
+```{r}
+library(keras)
+
+mnist <- dataset_fashion_mnist()
+data_x_test <- mnist$test$x
+data_y_test <- mnist$test$y
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
+
+
+# Flatten
+x_train <- array_reshape(x_train, c(nrow(x_train), 784))
+x_test <- array_reshape(x_test, c(nrow(x_test), 784))
+
+
+##### Train & Test Split ####
+# Normalize Values
+x_train <- x_train / 255
+x_test <- x_test / 255
+
+
+y_train <- to_categorical(y_train, 10)
+y_test <- to_categorical(y_test, 10)
+
+```
+
+```{r}
+print("Klassen-Verteilung der Trainingsdaten:")
+table(mnist$train$y)
+
+```
+
+```{r}
+print("Klassen-Verteilung der Testdaten:")
+table(mnist$test$y)
+```
+
+
+
+Für die Modellierung der neuronalen Netze werden wir das Framework Keras benutzen, welche wir bereits durch Data Mining I kennengelernen durften. Wir haben gesehen, dass CNN diverse Freiheitsgrade in der Modellierung dem Ingenieur überlassen. Wir wollen nachfolgend zunächst ein klassiches FC erstellen und Auffälligkeiten diskutieren. Danach werden wir ein \textit{base} CNN Modell definieren, welches und bei unserem Versuchsaufbau begleitet. Der Versuchaufbau untersucht insbesondere 
+
+
+\begin{enumerate}
+  \item Verschiedene Filter Größen
+  \item Verschiedene Striding Varianten
+  \item Mit und ohne Padding
+  \item Anzahl unterschiedlicher tiefen im Netz: CNN Layer (Conv,Max) 
+\end{enumerate}
+
+
+Da eine genauere Betrachtung der Hyperparameter (Lernrate, Aktivierungsfunktionen, Optimierer und Initialisierung der Gewichte) bereits in Data Mining 1 erfolgt ist, werden wir das base Modell zunächst durch probieren festlegen und uns dann gezielt auf die obigen Variationen fokussieren.
+
+\subsubsection{Teilaufgabe a: Erstellung eines Neuronales Netz}
+
+
+```{r}
+# show image
+# show_image = function(n){
+#   z = data_x_test[n,,]
+#   image(x = z, col = gray.colors(255), axes=FALSE)
+# }
+# 
+# show_image(4)
+```
+
+
+Zunächst werden uns ein einfaches FC erstellen, damit wir uns einen ersten Überblick über die Laufzeit und Genauigkeit eines herkömmlichen Neuronalen Netzes machen.
+Wir wählen die ReLu als Aktivierungsfunktion für die Hidden-Layer. Da es sich um ein multiples Klassifikationsmodell handelt, werden wie die Softmax-Funktion als finale Aktivierungsfunktion anwenden. 
+Die Netze werden mittels einer GPU (GeForce GTX 1060 Geforce) trainiert. Wir wählen bewusst eine Dropout - Rate von 50\% , um mögliches Overfitting zu vermeiden. 
+
+
+```{r warning=FALSE}
+
+# Initialization base Model
+# Model: FC (base)
+
+model <- keras_model_sequential() 
+model <- model %>% 
+          layer_dense(units = 256, activation = 'relu', input_shape = c(784)) %>% 
+          layer_dropout(rate = 0.5) %>% 
+          layer_dense(units = 128, activation = 'relu') %>%
+          layer_dropout(rate = 0.5) %>%
+          layer_dense(units = 10, activation = 'softmax')
+
+```
+
+```{r}
+summary(model)
+```
+
+
+Aus der Zusammenfassung lässt sich entnehmen das insgesamt \textbf{235.146} Gewichte zu optimieren sind. Obwohl wir nur ein kleines Bild von 28x28 Pixel haben, resultiert aus der Netzstruktur bereits ein rechenintensives Problem.
+
+
+
+Wir wählen für die Optimierung das RMSprop\footnote{Nähere Informationen zu RMSprop: \url{http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf}} (Root Mean Squard prop) Verfahren, welches insbesondere dafür sorgt, dass unsere Gewichte, welche die Richtung angeben stärker ins Minimum getrieben werden und die Bias Neuronen, welche für die Verschiebung innerhalb der Dimension verantwortlich sind, weniger ins Gewicht genommen werden.
+
+```{r}
+# Train the model
+# RMSprop (Folie 27): http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf
+# https://www.youtube.com/watch?v=_e-LFe_igno
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+```
+
+
+```{r}
+historyFC <- model %>% fit(
+  x_train, y_train,
+  epochs = 30, batch_size =128,
+  validation_split = 0.2,
+  verbose = 0
+)
+save_model_hdf5(model, "fully_base.h5")
+```
+
+
+
+```{r eval=TRUE}
+plot(historyFC)
+```
+
+
+```{r}
+historyFC
+```
+
+```{r}
+result_FC <- model %>% evaluate(x_test,y_test, verbose=0)
+
+```
+
+
+
+Der Modell konnte sich relativ gut an die Trainingsdaten anpassen. Die Accuracy auf den Trainingsdaten liegt bei `r round(historyFC$metrics$accuracy[30],4)`. Die Accuracy auf den Valdidierungsdaten ist `r round(historyFC$metrics$val_accuracy[30],4)`, welche leicht höher ist, dass das Modell gut generalisiert werden konnte. Betrachten wir nun einmal das finale Evaluierung auf den Test-Daten. Hier erreichen wir eine Accuracy von `r result_FC$accuracy`. 
+
+
+
+```{r}
+# prediction <- model %>% predict_classes(x_test)
+# prediction
+```
+
+
+
+\subsubsection{Teilaufgabe b: Erstellung eines Convolutional Neuronal Net}
+
+Wir haben zuvor ein klassisches neuronales Netz trainiert und bereits gute Ergebnisse erzielen können. Es fiel jedoch auf, dass die Anzahl der zu trainierenden Parameter relativ hoch war. Wir werden nun ein CNN konzeptionieren, welches als Grundlage für unseren Versuchsaufbau dient. 
+
+```{r}
+library(keras)
+
+mnist <- dataset_fashion_mnist()
+data_x_test <- mnist$test$x
+data_y_test <- mnist$test$y
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
+
+
+# Flatten
+x_train <- array_reshape(x_train, c(nrow(x_train), 28,28,1))
+x_test <- array_reshape(x_test, c(nrow(x_test), 28,28,1))  
+
+
+##### Train & Test Split ####
+# Normalize Values
+x_train <- x_train / 255
+x_test <- x_test / 255
+
+
+y_train <- to_categorical(y_train, 10)
+y_test <- to_categorical(y_test, 10)
+
+```
+
+
+
+```{r}
+#Build a CNN model (base)
+model_cnn_base <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",input_shape = c(28,28,1)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dropout(rate=0.5) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+```
+
+```{r}
+summary(model_cnn_base)
+```
+
+Die Netz Architektur läuft zunächst abwechselnd eine Convolution zusammen mit einer Pooling Operation (3-mal) durch. Wir erkennen, dass die Anzahl der Parameter in der Tiefe hin ansteigen, das bildet den ersten Kontrast zum vorherigen Neuronalen Netz, was jedoch am architektonischen Aufbau lag. Die Hidden-Layer nahmen in der vorherigen Modellierung stets ab, wodurch die Anzahl der Parameter monton viel. Dennoch kann man schön erkennen, dass gerade im Input Layer des vorherigen Layers bereits  200.960 Gewichte vorhanden waren und hier nur noch lediglich 320. Das ist eine große Reduzierung im Vergleich zu vorher. Weiterhin sehen wir auch, dass das CNN Raster direkt verarbeiten kann. Im 1. Convolution Layer legen wir 32 Filter fest, weshalb hier nun ein Block von ``Activation Maps'' mit der Dimension (26,26,32) vorliegt. Die Anzahl der zu optimierenden Parameter ergibt sich wie folgt:
+
+\begin{equation}
+  Total_{Parameters} = (F_{Höhe} \cdot F_{Breite} \cdot Anz_{Ebenen} + 1) \cdot Anz_{Filter} 
+\label{eq:dimension}
+\end{equation}
+
+Die Größe des Filters und die Anzahl der gewählten Ebenen bestimmen die Anzahl zu optimierender Gewichte innerhalb einer Ebene. Die zusätzliche Addition mit 1 ergibt sich durch den Bias. Das Pooling besitzt, wie zu erwarten, keine Gewichte. Wir habe eine Pooling-Size von (2,2) gewählt, wodurch wir ein Striding von 2 erzielen. In der nächsten Ebene werden 64 Filter benutzt, welche in 18.496 Parametern resultieren. Darauf folgt wieder eine Pooling Operation, gefolgt von einer Convolution Operation\footnote{Diese Abfolge findet sich leicht verändert auch in komplexeren Netzstrukturen wieder. Weshalb gerade bei sehr tiefen Netzen Problemen mit dem bekannten Vanish Gradient Problem führen kann. Eine Abhilfe schaffen hierfür Netze wie z.B. ResNet \url{https://arxiv.org/pdf/1512.03385.pdf}.}. 
+
+Der Keras-Layer \textit{flatten} erzeugt einen 1-dimensionlaen Vektor, welcher schließlich dem klassischen FC übergeben wird. Hier fallen lediglich nur noch 4.160 Gewichte an. Obwohl wir viele Ebenen davor haben, so kommen wir in einer Summe auf 60.553 Gewichte. Das sind gerade mal 30\% der vorherigen Gewichte. 
+
+
+
+
+```{r}
+#Compile the model
+model_cnn_base %>% compile(
+    optimizer='rmsprop',
+    loss='categorical_crossentropy',
+    metrics='accuracy')
+```
+
+```{r}
+#Train the model
+history <- model_cnn_base %>% fit(
+   x_train,y_train,
+   epochs=30,
+   batch_size=128,
+   validation_split=0.2,
+   verbose=0)
+
+# save model
+save_model_hdf5(model_cnn_base, "cnn_base.h5")
+history
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+result <- model_cnn_base %>% evaluate(x_test,y_test, verbose=0)
+```
+
+Der Modell konnte sich relativ gut an die Trainingsdaten anpassen. Die Accuracy auf den Trainingsdaten liegt bei `r round(history$metrics$accuracy[30],4)`. Die Accuracy auf den Valdidierungsdaten ist `r round(history$metrics$val_accuracy[30],4)`, welche leicht höher ist, dass das Modell gut generalisiert werden konnte. Betrachten wir nun einmal die finale Evaluierung auf den Test-Daten. Hier erreichen wir eine Accuracy von `r result$accuracy`.  
+
+
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lllll}
+\rowcolor[HTML]{656565} 
+{\color[HTML]{FFFFFF} }                            & {\color[HTML]{FFFFFF} T-Acc}                    & {\color[HTML]{FFFFFF} V-Acc}                         & {\color[HTML]{FFFFFF} S-Acc} & {\color[HTML]{FFFFFF} \#Param} \\
+\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} FC}  & `r round(historyFC$metrics$accuracy[30],4)` & `r round(historyFC$metrics$val_accuracy[30],4)` & `r result_FC$accuracy`     & 235.146                        \\
+\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} CNN} & `r round(history$metrics$accuracy[30],4)`   & `r round(history$metrics$val_accuracy[30],4)`   & `r result$accuracy`         & 60.554                        
+\end{tabular}
+\caption{Vergleich zwischen klassischen Neuronalen Netz mit CNN}
+\label{tab:comparison_fc_cnn}
+\end{table}
+
+
+
+
+In Tabelle \ref{tab:comparison_fc_cnn} haben wir nochmal den Vergleich beider Netze gegenüber gestellt. Dabei bezeichnet \textit{T-Acc} den Accuracy auf den Trainingsdaten. Analog \textit{V-Acc} die Accuracy auf den den Validierungsdaten und letztlich \textit{S-Score} die finale Evaluierung auf den Testdaten. Die Gegenüberstellung zeigt nochmal ganz deutlich den Unterschied der Parameteranzahl, wobei die Genauigkeit der Klassifikation unter einer Reduzierung der Parameter sich nur leicht verschlechtert, was jedoch auch abhängig von der Wahl der Hyperparameter ist. 
+
+\subsubsection{Experiment}
+
+Wir wollen nun spezieller die Eigenschaften der CNN untersuchen. Hierzu variieren wir bestimmte Komponenten der CNN Struktur ab, wobei wir die restliche Struktur fixieren, um deren Effekt zu ermitteln. Für eine bessere Lesbarkeit haben wir folgende Abkürzungen benutzt. Farblich hervor gehoben wurden jeweils die besten Werte \textit{mit} und \textit{ohne} Padding. Dabei stellt die Farbe \textit{rot} den niedrigeren besten Wert der jeweiligen Rubrik dar. Analog stellt die Farbe \textit{grün} den besseren Wert der beiden Rubriken dar.
+
+\begin{itemize}
+  \item W: Input Volumen Größen
+  \item P: Anzahl des Padding-Größe
+  \item F: Anzahl der Filter-Größe
+  \item S: Anzahl für nächste Raster Verschiebung
+  \item \#F: Anzahl der Filter 
+  \item T-Err: Trainingsfehler
+  \item T-Acc: Accuracy auf den Trainingsdaten
+  \item V-Err: Valdidierungsfehler
+  \item V-Acc: Accuracy auf den Validierungsdatenebung
+  \item S-Err: Testfehler
+  \item S-Acc: Accuracy auf den Testdaten
+  \item \#Param: Anzahl der Parameter
+\end{itemize}
+
+
+Wir werden jeweils versuchen die maximal mögliche Tiefe der Netze zu erzielen. 
+
+\begin{table}[H]
+\begin{tabular}{llllllllllllr}
+\rowcolor[HTML]{656565} 
+{\color[HTML]{FFFFFF} \textbf{ID}}                                     & {\color[HTML]{FFFFFF} \textbf{W}}               & {\color[HTML]{FFFFFF} \textbf{F}}              & {\color[HTML]{FFFFFF} \textbf{P}}              & {\color[HTML]{FFFFFF} \textbf{S}}              & {\color[HTML]{FFFFFF} \textbf{\#F}}               & {\color[HTML]{FFFFFF} \textbf{T-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{T-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{S-Loss}}                                              & {\color[HTML]{FFFFFF} \textbf{S-Acc}}                                           & {\color[HTML]{FFFFFF} \textbf{\#Param}}                                    \\ \cline{2-13}  
+\rowcolor[HTML]{FFFFFF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 1}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2902}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8942}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2758}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8967}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2991}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8924}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}41,962}                                  \\ \cline{2-13} 
+\rowcolor[HTML]{FFFFFF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 2}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2814}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8974}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.3158}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8862}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.3410}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.8812}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}60,554}                                  \\ \cline{2-13} 
+\rowcolor[HTML]{FFFFFF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 3}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}5} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{FE0000} \textbf{0.1876}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{FE0000} \textbf{0.9303}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{009901} \textbf{0.2333}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{FE0000} \textbf{0.9198}}}   & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{009901} \textbf{0.2486}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{FE0000} \textbf{0.9151}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}118,346}                                 \\ \cline{2-13} 
+\rowcolor[HTML]{FFFFFF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 4}} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}7} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2261}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.9169}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2813}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.9032}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.2962}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}0.9005}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{009901} \textbf{119,114}}} \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 5}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.1437}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9487}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3594}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9111}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.4121}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9050}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}132,330}                                 \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 6}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.0869}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9711}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.4356}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9168}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.4827}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9105}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}286,090}                                 \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 7}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}5} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.0800}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9706}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3321}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9222}}}   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3488}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9199}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{FE0000} \textbf{355,978}}} \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{9B9B9B}{\color[HTML]{FFFFFF} 8}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}7} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.1200}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9555}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{FE0000} \textbf{0.2704}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9207}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{FE0000} \textbf{0.2927}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9143}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}303,434}                                 \\ \cline{2-13} 
+\end{tabular}
+\caption{Vergleich: Variation der Filtergröße mit und ohne Padding}
+\label{tab:filter_measure}
+\end{table}
+
+In Tabelle \ref{tab:filter_measure} sehen wir einen Vergleich der Modelle unterschiedlich gewählter Filtergrößen. Bei Betrachtung der Filtergrößen und die daraus resultierende maximale Anzahl an Parametern, fällt auf, dass Padding fast dreimal soviel Parameter zum Optimieren hervorbringt, wie die Modelle ohne Padding. Es fällt auf, dass die erhöhte Anzahl an Parametern, welche sich kontinuierlich durch Padding ergibt, zu einem geringeren Trainingsfehler führen, wodurch wir erkennen, dass das Modell sich somit besser an die Daten anpasst. Hinsichtlich der Generalisierbarkeit ziehen die Modelle mit Padding und ohne Padding nahezu gleich. Padding ist jedoch leicht besser, bringen jedoch viel mehr Parameter hervor, womit eine erhöhte Trainingszeit eingeht. Padding zeigt einen besonderen Mehrwert bei Bildern, welche Klassenrelevante Features insbesondere an den Randbereichen besitzen. Der vorliegende Datensatz zentriert die Objekte meist mittig, weshalb der Unterschied im Hinblick auf die Genauigkeit nur gering ist.
+
+
+
+\begin{table}[H]
+\begin{tabular}{llllllllllllr}
+\rowcolor[HTML]{656565} 
+{\color[HTML]{FFFFFF} \textbf{ID}}                                     & {\color[HTML]{FFFFFF} \textbf{W}}               & {\color[HTML]{FFFFFF} \textbf{F}}              & {\color[HTML]{FFFFFF} \textbf{P}}              & {\color[HTML]{FFFFFF} \textbf{S}}              & {\color[HTML]{FFFFFF} \textbf{\#F}}               & {\color[HTML]{FFFFFF} \textbf{T-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{T-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{S-Loss}}                                              & {\color[HTML]{FFFFFF} \textbf{S-Acc}}                                           & {\color[HTML]{FFFFFF} \textbf{\#Param}}                                    \\ \cline{2-13}  
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 9}}  & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{base}                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.2862}}}     & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.8958}}}                         & \multicolumn{1}{l|}{0.3053}                                                         & \multicolumn{1}{l|}{0.8889}                                                           & \multicolumn{1}{l|}{0.3285}                                                         & \multicolumn{1}{l|}{0.8810}                                                         & \multicolumn{1}{l|}{60,554}                                                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 10}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{4}                         & \multicolumn{1}{l|}{base}                         & \multicolumn{1}{l|}{0.3810}                                                   & \multicolumn{1}{l|}{0.8626}                                                         & \multicolumn{1}{l|}{0.3239}                                                         & \multicolumn{1}{l|}{0.8866}                                                           & \multicolumn{1}{l|}{0.3424}                                                         & \multicolumn{1}{l|}{0.8758}                                                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{23,626}}}                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 11}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{6}                         & \multicolumn{1}{l|}{base}                         & \multicolumn{1}{l|}{0.2891}                                                   & \multicolumn{1}{l|}{0.8923}                                                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.2794}}}                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.8968}}}                           & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.2922}}}                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.8892}}}                         & \multicolumn{1}{l|}{35,914}                                                         \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 12}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.0985}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9668}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3340}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9104}}}   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3532}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.9083}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}286,090}                                \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 13}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}4} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3244}                           & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.8833}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3455}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.8798}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.3782}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.8662}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{60,554}}} \\ \cline{2-13} 
+\rowcolor[HTML]{ECF4FF} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 14}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}6} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}base} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.2467}                           & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9071}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.2713}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.9033}                                   & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}{\color[HTML]{009901} \textbf{0.2913}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}0.8961}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{ECF4FF}85,066}                                 \\ \cline{2-13} 
+\end{tabular}
+\caption{Vergleich unterschiedlicher Strides im Pooling Layer mit und ohne Padding}
+\label{tab:stride_measure}
+\end{table}
+
+
+In Tabelle \ref{tab:stride_measure} ist ein Vergleich unterschiedlicher Strides im Pooling Layer mit und ohne Padding zu sehen. Man würde davon ausgehen, dass die Anzahl der Parameter mit einem höheren Striding Faktor stetig abnimmt. Wir sehen jedoch, dass es nochmal zu einem Anstieg kommt, welcher darauf zurückzuführen ist, dass in der letzten Netzebene kein Striding mehr angewendet werden konnte, da die Anzahl der verbliebenden Dimensionen aus der Convolution Operation kleiner sind als der Striding Faktor. Daher ist die letzte Ebene eine Convolution Operation ohne nachträgliches Pooling, wodurch es hierdurch nicht zu dem angenommen monotonen Fall der Parameter Anzahlen kommt. 
+Weiterhin fällt auf, dass eine Erhöhung des Striding Faktor zu einer besseren Modell Generalisierbarkeit führt. Die Modelle zeigen mit der Erhöhung des Striding Faktors geringere Differenzen zwischen Trainingsfehler und Validierungsfehler auf.
+
+
+\begin{table}[H]
+\begin{tabular}{llllllllllllr}
+\rowcolor[HTML]{656565} 
+{\color[HTML]{FFFFFF} \textbf{ID}}                                     & {\color[HTML]{FFFFFF} \textbf{W}}               & {\color[HTML]{FFFFFF} \textbf{F}}              & {\color[HTML]{FFFFFF} \textbf{P}}              & {\color[HTML]{FFFFFF} \textbf{S}}              & {\color[HTML]{FFFFFF} \textbf{\#F}}               & {\color[HTML]{FFFFFF} \textbf{T-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{T-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Err}}                                               & {\color[HTML]{FFFFFF} \textbf{V-Acc}}                                               & {\color[HTML]{FFFFFF} \textbf{S-Loss}}                                              & {\color[HTML]{FFFFFF} \textbf{S-Acc}}                                           & {\color[HTML]{FFFFFF} \textbf{\#Param}}                                    \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 15}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{asc}                          & \multicolumn{1}{l|}{0.3412}                                                         & \multicolumn{1}{l|}{0.8752}                                                         & \multicolumn{1}{l|}{0.3422}                                                         & \multicolumn{1}{l|}{0.8760}                                                         & \multicolumn{1}{l|}{0.3521}                                                         & \multicolumn{1}{l|}{0.8699}                                                         & \multicolumn{1}{l|}{28,106}                                                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 16}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{desc}                         & \multicolumn{1}{l|}{0.5179}                                                         & \multicolumn{1}{l|}{0.8122}                                                         & \multicolumn{1}{l|}{{\color[HTML]{000000} 0.7004}}                                  & \multicolumn{1}{l|}{0.6942}                                                         & \multicolumn{1}{l|}{0.7033}                                                         & \multicolumn{1}{l|}{0.6952}                                                         & \multicolumn{1}{l|}{25,466}                                                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 17}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{16}                           & \multicolumn{1}{l|}{0.6009}                                                         & \multicolumn{1}{l|}{0.7862}                                                         & \multicolumn{1}{l|}{0.6878}                                                         & \multicolumn{1}{l|}{0.7521}                                                         & \multicolumn{1}{l|}{0.6873}                                                         & \multicolumn{1}{l|}{0.7538}                                                         & \multicolumn{1}{l|}{{\color[HTML]{009901} \textbf{6,538}}}                          \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 18}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{32}                           & \multicolumn{1}{l|}{0.4124}                                                         & \multicolumn{1}{l|}{0.8524}                                                         & \multicolumn{1}{l|}{0.4156}                                                         & \multicolumn{1}{l|}{0.8391}                                                         & \multicolumn{1}{l|}{0.4266}                                                         & \multicolumn{1}{l|}{0.8325}                                                         & \multicolumn{1}{l|}{21,578}                                                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 19}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{64}                           & \multicolumn{1}{l|}{0.2743}                                                         & \multicolumn{1}{l|}{0.9005}                                                         & \multicolumn{1}{l|}{{\color[HTML]{009901} \textbf{0.2927}}}                         & \multicolumn{1}{l|}{0.8952}                                                         & \multicolumn{1}{l|}{{\color[HTML]{009901} \textbf{0.3156}}}                         & \multicolumn{1}{l|}{0.8915}                                                         & \multicolumn{1}{l|}{79,306}                                                         \\ \cline{2-13} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 20}} & \multicolumn{1}{l|}{28}                         & \multicolumn{1}{l|}{3}                         & \multicolumn{1}{l|}{0}                         & \multicolumn{1}{l|}{2}                         & \multicolumn{1}{l|}{128}                          & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.2025}}}                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.9286}}}                         & \multicolumn{1}{l|}{0.3094}                                                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.9018}}}                         & \multicolumn{1}{l|}{0.3426}                                                         & \multicolumn{1}{l|}{{\color[HTML]{FE0000} \textbf{0.9006}}}                         & \multicolumn{1}{l|}{305,354}                                                        \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 21}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}asc}  & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.1021}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9659}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3554}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9074}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3786}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9037}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}409,418}                                \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 22}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}desc} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.2393}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9207}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{FE0000} \textbf{0.3324}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.8884}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{FE0000} \textbf{0.3546}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.8824}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}396,218}                                \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 23}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}16}   & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.4320}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.8456}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.7121}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.6832}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.7131}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.6860}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{FE0000} \textbf{11,178}}} \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 24}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}32}   & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.2254}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9232}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3392}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.8782}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3578}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.8727}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}40,074}                                 \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 25}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}64}   & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.1144}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9612}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3378}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{009901} \textbf{0.9132}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.3723}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{009901} \textbf{0.9106}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}153,162}                                \\ \cline{2-13} 
+\rowcolor[HTML]{DAE8FC} 
+\multicolumn{1}{l|}{\cellcolor[HTML]{C0C0C0}{\color[HTML]{FFFFFF} 26}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}28} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}3} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}1} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}2} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}128}  & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{009901} \textbf{0.0868}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}{\color[HTML]{009901} \textbf{0.9733}}} & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.4705}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9107}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.5044}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}0.9072}                                 & \multicolumn{1}{l|}{\cellcolor[HTML]{DAE8FC}600,522}                                \\ \cline{2-13} 
+\end{tabular}
+\caption{Vergleich: Variation der Anzahl von Filtern mit und ohne Padding}
+\label{tab:filterAnz_measure}
+\end{table}
+
+In Tabelle \ref{tab:filterAnz_measure} werden die Ergebnisse des Experiments über die Variation der Anzahl von Filtern mit und ohne Padding dargelegt. Neben den unterschiedlichen Anzahlen, welche in allen Convolutional Ebene konstant bleiben, untersuchen wir auch einmal, wie sich Anstieg \textit{asc} und Abstieg \textit{desc} auf die Modelle auswirken. Hierbei ergaben sich für Padding die Anzahl Filter (16,32,64,128) und ohne Padding (16,32,64). Es fällt zunächst einmal auf, dass ein Abstieg der Anzahl Filter letztlich in mehr Parameter resultieren. Die Modellgüte für ansteigende Filter Anzahlen ist durchweg besser gegenüber der absteigenden Filter Anzahlen. Wir sehen bei den konstant gesetzten Filter Anzahlen in jedem Convolutional Layer, dass die Anzahl der Parameter mit der steigender Anzahl Filter auch steigt. Es fällt auch wieder auf, dass die steigende Anzahl an Parametern die Genauigkeit des Modells verbessert. 
+
+
+\subsubsection{Fazit}
+
+Wir haben gesehen, dass die Filtergröße und der Striding Faktor die Netztiefe beeinflussen. Die Filtergröße, sowie die Anzahl der Filter bestimmen maßgeblich den zu optimierenden Gewichtssatz. Das Pooling erhöht die Generalisierbarkeit während das Striding gleichzeitig die Anzahl der zu trainierenden Parameter reduziert. Insgesamt zeigt sich das CNN äußerst effektiv und stellt somit eine gute Möglichkeit bereit hochdimensionale Daten zu verarbeiten.
+
+

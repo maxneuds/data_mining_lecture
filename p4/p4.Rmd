@@ -1,0 +1,500 @@
+---
+title:
+output: 
+  pdf_document:
+    latex_engine: lualatex
+lang: de
+documentclass: article
+geometry: 'top=30mm, bottom=30mm, inner=20mm, outer=20mm'
+fontsize: '11pt'
+# mainfont: 'Source Serif Pro'
+# sansfont: 'Source Sans Pro'
+# monofont: 'Source Code Pro'
+header-includes:
+- '\usepackage{unicode-math}'
+- '\usepackage{pdfpages}'
+- '\usepackage{palatino,eulervm,amsmath,amssymb,amsthm}'
+- '\renewcommand{\rmdefault}{pplx}'
+- '\usepackage{csquotes}'
+- '\usepackage{dsfont}'
+- '\usepackage{listings}'
+- '\usepackage{textcomp}'
+- '\usepackage{tabularx}'
+- '\usepackage{float}'
+- '\usepackage{colortbl}'
+- '\usepackage{multirow}'
+- '\usepackage{booktabs}'
+- '\usepackage{fancyhdr}'
+- '\pagestyle{fancy}'
+- '\fancyhf{}'
+- '\setlength{\headheight}{14pt}'
+- '\fancyhead[C,C]{\leftmark}'
+- '\fancyhead[L]{}'
+- '\fancyhead[R]{}'
+- '\fancyfoot[C,C]{\thepage}'
+- '\renewcommand{\footrulewidth}{0.4pt}'
+---
+
+<style type="text/css">
+body{
+  font-size: 12px;
+}
+h1 {
+  font-size: 18px;
+}
+h1 {
+  font-size: 14px;
+}
+h1 {
+  font-size: 12px;
+}
+</style>
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=TRUE,     # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = '#>',    # change comment character
+                      fig.align = 'center',
+                      fig.width = 10,     # set figure width
+                      out.width = '100%', # set width of displayed images
+                      warning=FALSE,      # show R warnings
+                      message=FALSE)     # show R messages
+```
+
+<!---** Hochschule Darmstadt | Studiengang Data Science | Wintersemester 2019 **--->
+
+```{r, echo=FALSE, warning=FALSE}
+set.seed(42)
+usepackage = function(package_name) 
+{
+  p = deparse(substitute(package_name))
+  if (!is.element(p, installed.packages()[,1]))
+    install.packages(p, dep = TRUE)
+  require(p, character.only = TRUE)
+}
+```
+
+\section{Praktikum 4: Recurrent Neural Networks}
+
+\subsection{Datenanalyse}
+
+```{r, echo=FALSE}
+# import data 
+canberra_train = read.csv('data/canberra_train.csv')
+canberra_test = read.csv('data/canberra_test.csv')
+darwin_train = read.csv('data/darwin_train.csv')
+darwin_test = read.csv('data/darwin_test.csv')
+```
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{res/candarwin.png}
+  \caption{Google Maps: Geographische Position von Canberra und Darwin}
+  \label{fig:candarwin}
+\end{figure}
+
+Wir beginen zunächst damit uns einen Überblick über die Daten zu machen, um weiteres Vorgehen zu evaluieren. In Abbildung \ref{fig:candarwin} werden beide Städte geographisch dargestellt.
+Beide Datensätze beinhalten die selben Merkmale, weshalb wir diese nun zunächst allgemein erläutern.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|
+>{\columncolor[HTML]{EFEFEF}}l |l|l|l|}
+\hline
+\cellcolor[HTML]{9B9B9B}{\color[HTML]{EFEFEF} \textbf{Merkmal}} & \cellcolor[HTML]{9B9B9B}{\color[HTML]{EFEFEF} \textbf{Beschreibung}}             & \cellcolor[HTML]{9B9B9B}{\color[HTML]{EFEFEF} \textbf{Skalenniveau}} & \cellcolor[HTML]{9B9B9B}{\color[HTML]{EFEFEF} \textbf{Beispiel}} \\ \hline
+\textbf{X}                                                      & \cellcolor[HTML]{FE0000}{\color[HTML]{FFFFFF} ID}                                & \cellcolor[HTML]{FE0000}{\color[HTML]{FFFFFF} nominal}               & \cellcolor[HTML]{FE0000}{\color[HTML]{FFFFFF} 49232}             \\ \hline
+\textbf{Date}                                                   & Datum                                                                            & ordinal                                                              & 2007-11-01                                                       \\ \hline
+\textbf{MinTemp}                                                & Minimum Temperatur des Tages                                                     & metrisch                                                             & 8.0                                                              \\ \hline
+\textbf{MaxTemp}                                                & Maximum Temperatur des Tages                                                     & metrisch                                                             & 24.3                                                             \\ \hline
+\textbf{Evaporation}                                            & Verdunstung                                                                      & metrisch                                                             & 3.4                                                              \\ \hline
+\textbf{Sunshine}                                               & Sonnenschein ? STUNDEN ?                                                         & metrisch                                                             & 6.3                                                              \\ \hline
+\textbf{WindGustDir}                                            & \cellcolor[HTML]{FFFE65}{\color[HTML]{000000} Wind Richtung ? VOM TAG ?}         & \cellcolor[HTML]{FFFE65}{\color[HTML]{000000} nominal}               & \cellcolor[HTML]{FFFE65}{\color[HTML]{000000} NW}                \\ \hline
+\textbf{WindGustSpeed}                                          & Wind Geschwindigkeit                                                             & metrisch                                                             & 30                                                               \\ \hline
+\textbf{WindGustDir9am}                                         & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} Wind Richtung morgens um 9}        & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} nominal}               & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} SW}                \\ \hline
+\textbf{WindDir3pm}                                             & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} Wind Richtung mittags um 15}       & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} nominal}               & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} NW}                \\ \hline
+\textbf{WindSpeed9am}                                           & Wind Geschwindigkeit morgens um 9                                                & metrisch                                                             & 6                                                                \\ \hline
+\textbf{WindSpeed3pm}                                           & Wind Geschwindigkeit mittags um 15                                               & metrisch                                                             & 20                                                               \\ \hline
+\textbf{Humidity9am}                                            & Luftfeuchtigkeit morgens um 9                                                    & metrisch                                                             & 68                                                               \\ \hline
+\textbf{Humidity3pm}                                            & Luftfeuchtigkeit mitttags um 15                                                  & metrisch                                                             & 29                                                               \\ \hline
+\textbf{Pressure9am}                                            & Luftdruck morgens um 9                                                           & metrisch                                                             & 1019.7                                                           \\ \hline
+\textbf{Pressure3pm}                                            & Luftdruck mittags um 15                                                          & metrisch                                                             & 1015.0                                                           \\ \hline
+\textbf{Cloud9am}                                               & Bewölkung morgens um 9                                                           & ordinal                                                              & 7                                                                \\ \hline
+\textbf{Cloud3pm}                                               & Bewölkung mittags um 15                                                          & ordinal                                                              & 7                                                                \\ \hline
+\textbf{Temp9am}                                                & Temperatur morgens um 9                                                          & metrisch                                                             & 14.4                                                             \\ \hline
+\textbf{Temp3pm}                                                & Temperatur mittags um 15                                                         & metrisch                                                             & 23.6                                                             \\ \hline
+\textbf{RainToday}                                              & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} Regentag ?}                        & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} nominal}               & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} No}                \\ \hline
+\textbf{RainTomorrow}                                           & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} War der nächste Tag ein Regentag?} & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} nominal}               & \cellcolor[HTML]{F8FF00}{\color[HTML]{000000} Yes}               \\ \hline
+\end{tabular}
+\caption{Überblick der vorhanden Metrik}
+\label{tab:feature_overview}
+\end{table}
+
+In Tabelle \ref{tab:feature_overview} sehen wir welche Merkmale zu welchen Skalenniveau vorliegen. In gelb markiert sind all diejenigen Merkmale, welche wir noch kodieren müssen, da das rnn nur numerische Werte akzeptiert. Deshalb verwenden wir One-Hot-Encoding und nehmen die verschieden Ausprägungen als neue Features.
+
+\subsubsection*{Überblick Temperatur}
+
+```{r, echo=FALSE}
+library(xts)
+#Explorative Data Analysis
+data_canberra <- rbind(canberra_train, canberra_test)
+data_canberra["city"] <- "canberra"
+
+data_darwin <- rbind(darwin_train, darwin_test)
+data_darwin["city"] <- "darwin"
+
+df <- rbind(data_canberra, data_darwin)
+#df$Date <- as.Date(df$Date)
+
+df_ts <- xts(df[,-c(1,2)], order.by = as.Date(df$Date), "%Y-%m-%d")
+
+df_temp <- df_ts[,c("MaxTemp","MinTemp","Humidity9am","Humidity3pm", "Pressure9am","Pressure3pm","city", "RainToday")]
+df_temp$city <- as.factor(df_temp$city)
+df_temp$RainToday <- as.factor(df_temp$RainToday)
+storage.mode(df_temp) <- "numeric"
+```
+
+Wir sehen, dass es über das Jahr deutlich stärkere Temperaturschwankungen in Canberra als in Darwin gibt und, dass die durchschnittliche Temperatur in Darwin höher ist.
+
+```{r, warning=FALSE, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+gg = ggplot(data = df_temp)
+gg = gg + geom_line(
+  aes(Index, MaxTemp, group=city, color=factor(city,labels = c("Canberra", "Darwin"))))
+gg = gg + scale_x_date()
+gg = gg + xlab("Jahr") + ylab("Max. Temperatur") + labs(color = "Stadt")
+gg = gg + ggtitle("Max. Temperatur im Vergleich")
+gg
+```
+
+```{r, warning=FALSE, echo=FALSE}
+# Plot Temperatur
+ggplot(data = df_temp, aes(x = Index, y = MaxTemp, color=factor(city,labels = c("Canberra", "Darwin")))) +
+  geom_smooth(method = lm, formula = y ~ splines::bs(x, 3))+
+  ylab("Temperatur")+
+  xlab("Datum")+
+  labs(color = "Stadt")+
+  ggtitle("Höchsttemperatur (Spline)")
+```
+
+\subsubsection*{Überblick Luftfeuchtigkeit}
+
+Verschaffen wir uns nun einen Überblick über die Luftfeuchtigkeit.
+Hierzu haben wir die Daten logarithmiert, wodurch das Verhalten der Luftfeuchtigkeit besser ersichtlich ist. Es fällt besonders auf, dass in den Hochphasen von Canberra geringere Luftfeuchtigkeiten in Darwin gemessen werden und umgekehrt. Man erkennt somit ein anti-zyklisches Muster und, dass es in Canberra im Mittel über das Jahr feuchter als in Darwin ist. 
+
+```{r, warning=FALSE, echo=FALSE}
+ggplot(data = df_temp)+
+  geom_line(aes(Index, log(Humidity9am), group=city, color=factor(city,labels = c("Canberra", "Darwin"))))+
+  scale_x_date()+
+  xlab("Jahr")+
+  ylab("Log - Luftfeuchtigkeit in %")+
+  labs(color = "Stadt")+
+  ggtitle("Logarithmierte - Luftfeuchtigkeit am Morgen ")
+```
+
+```{r, warning=FALSE, echo=FALSE}
+ggplot(data = df_temp)+
+  geom_line(aes(Index, log(Humidity3pm), group=city, color=factor(city,labels = c("Canberra", "Darwin"))))+
+  scale_x_date()+
+  xlab("Jahr")+
+  ylab("Log - Luftfeuchtigkeit in %")+
+  labs(color = "Stadt")+
+  ggtitle("Logaritmierte - Luftfeuchtigkeit am Mittag")
+```
+
+```{r, warning=FALSE, echo=FALSE}
+# Plot Temperatur
+ggplot(data = df_temp, aes(x=Index, y=Humidity9am, color=factor(city,labels = c("Canberra", "Darwin")))) +
+  geom_smooth(method = lm, formula = y ~ splines::bs(x, 3))+
+  ylab("Luftfeuchtigkeit in %")+
+  xlab("Datum")+
+  labs(color = "Stadt")+
+  ggtitle("Luftfeuchtigkeit am Morgen (Spline)")
+```
+
+\subsubsection*{Übersicht der Regentage}
+
+Schauen wir uns die aufsummierte Anzahl an Regentagen pro Monat an, so erkennen wir deutlich, dass es in Darwin offensichtlich Regenzeiten und Trockenzeiten gibt, wohin gegen der Regen in Canberra über das Jahr hin leichten, aber nicht auffälligen Schwankungen unterliegt.
+
+
+```{r, warning=FALSE, echo=FALSE}
+library(lubridate)
+temp <- df[,c("Date","RainToday","city")]
+
+temp <- tibble(date=as.Date(df$Date),
+                   city=df$city,
+                   rain=df$RainToday)
+
+temp <- temp %>% group_by(month=floor_date(date,"month"), city) %>% count(rain)
+temp <- na.omit(temp[temp$rain == "Yes",c("month","city","n")])
+
+ggplot(data=temp, aes(fill=city, y=n, x=month))+
+  geom_bar(position="dodge", stat="identity")+
+  xlab("Jahr")+
+  ylab("Regentage pro Monat")+
+  labs(fill = "Stadt")+
+  ggtitle("Anzahl der Regentage je Stadt")
+```
+
+\subsection{Feature Engineering}
+
+\subsubsection*{Erstellung der Merkmale}
+
+Wie zuvor erwähnt müssen einige Spalten in numerische Werte kodiert werden, damit diese vom neuronalen Netz genutzt werden können. Hierzu wenden wir nun One-Hot-Encoding an, was jedoch zum Nachteil hat, dass sich die Dimension unserer Trainingsdaten massiv erweitert.
+Zunächst schauen wir uns jedoch einmal die Reinheit des Datensatz an, um gegebenfalls fehlende Werte herauszunehmen oder zu ersetzen.
+
+```{r, echo=FALSE}
+library(Amelia)
+par(mfrow=c(2,2))
+missmap(canberra_train, main = "Canberra - Training Data")
+missmap(canberra_test, main = "Canberra - Test Data")
+missmap(darwin_train, main = "Darwin - Training Data")
+missmap(darwin_test, main = "Darwin - Test Data")
+```
+
+Der Canberra Trainingsdatensatz hat beinhaltet ca. 10\% fehlende Werte, welche es zu ersetzen gilt.
+Der Testdatensatz beinhaltet sogar noch mehr fehlende Werte (15\%). Insbesondere fehlen Werte in den Spalten Sunshine und Evaporation komplett, weshalb wir diese Spalten komplett entfernen werden und die restlichen fehlenden Werte berechnen wird mittels Random Forest Regression. Hierzu nutzen wir das Package \textit{missForest}.
+
+```{r, echo=FALSE}
+# Define One Hot Encoding Function - for covariates
+onehot_weather <- function(df) {
+  wgd = one_hot(as.data.table(df$WindGustDir))
+  colnames(wgd) = c("WGD_E","WGD_ENE","WGD_ESE","WGD_N","WGD_NE",
+                    "WGD_NNE","WGD_NNW","WGD_NW","WGD_S","WGD_SE",
+                    "WGD_SSE","WGD_SSW","WGD_SW","WGD_W","WGD_WNW","WGD_WSW")
+  df$WindGustDir = NULL
+  wgd9 = one_hot(as.data.table(df$WindDir9am))
+  colnames(wgd9) = c("WGD9_E","WGD9_ENE","WGD9_ESE","WGD9_N","WGD9_NE",
+                     "WGD9_NNE","WGD9_NNW","WGD9_NW","WGD9_S","WGD9_SE",
+                     "WGD9_SSE","WGD9_SSW","WGD9_SW","WGD9_W","WGD9_WNW","WGD9_WSW")
+  df$WindDir9am = NULL
+  wgd3 = one_hot(as.data.table(df$WindDir3pm))
+  colnames(wgd3) = c("WGD3_E","WGD3_ENE","WGD3_ESE","WGD3_N","WGD3_NE",
+                     "WGD3_NNE","WGD3_NNW","WGD3_NW","WGD3_S","WGD3_SE","WGD3_SSE",
+                     "WGD3_SSW","WGD3_SW","WGD3_W","WGD3_WNW","WGD3_WSW")
+  df$WindDir3pm = NULL
+  rtd = one_hot(as.data.table(df$RainToday))[,2]
+  colnames(rtd) = c("RainToday")
+  Date <- df$Date
+  df$RainToday = NULL
+  df$X = NULL
+  df$Date <- NULL
+  df$Evaporation <- NULL
+  df$Sunshine <- NULL
+  df_res = cbind(df, wgd, wgd9, wgd3)
+  df_res <- missForest(df_res, parallelize = 'forests', maxiter = 10, ntree = 100)
+  df_res = cbind(Date,df_res$ximp, rtd)
+
+  return(df_res)
+}
+
+# Define one hot encoding function for target value
+binary_y <- function(date, y) {
+  y_new = one_hot(as.data.table(y))[,2]
+  return(cbind(date,y_new))
+}
+
+#-------------------------- DATA CLEANING -------------------------------------------------------
+# Clean objects stored in data/clean_data.RData
+#################################     CANBERRA    ################################################
+##################################################################################################
+# Encoding Canberra Training
+# x_canberra_train = onehot_weather(canberra_train)
+# y_canberra_train = binary_y(date = x_canberra_train$Date,x_canberra_train$RainTomorrow)
+# 
+# 
+# # Encoding Canberra Test
+# x_canberra_test = onehot_weather(canberra_test)
+# y_canberra_test = binary_y(x_canberra_test$Date,x_canberra_test$RainTomorrow)
+# 
+# 
+# colnames(y_canberra_train) = c("Date","RainTomorrow")
+# colnames(y_canberra_test) = c("Date","RainTomorrow")
+# 
+# x_canberra_train$RainTomorrow = NULL
+# x_canberra_test$RainTomorrow = NULL
+# 
+# 
+# 
+# #################################     Darwin    ##################################################
+# ##################################################################################################
+# 
+# # Encoding Darwin Training
+# x_darwin_train = onehot_weather(darwin_train)
+# y_darwin_train = binary_y(x_darwin_train$Date,x_darwin_train$RainTomorrow)
+# 
+# 
+# # Encoding Darwin Test
+# x_darwin_test = onehot_weather(darwin_test)
+# y_darwin_test = binary_y(x_darwin_test$Date,x_darwin_test$RainTomorrow)
+# 
+# 
+# colnames(y_darwin_train) = c("Date","RainTomorrow")
+# colnames(y_darwin_test) = c("Date","RainTomorrow")
+# 
+# x_darwin_train$RainTomorrow = NULL
+# x_darwin_test$RainTomorrow = NULL
+# 
+# save(x_darwin_train,x_darwin_test,x_canberra_train,x_canberra_test,y_darwin_train, y_darwin_test, y_canberra_train,y_canberra_test, file = "clean_data.RData")
+
+#-------------------------- DATA Loading -------------------------------------------------------
+load("data/clean_data.RData")
+```
+
+```{r, echo=FALSE}
+missmap(x_canberra_train, main = "Canberra - Training Datenset (Bereinigt)")
+```
+
+Die Anzahl an Features ist durch das One-Hot-Encoding von 22 auf 63 gewachsen.
+Das kann man soweit für das Netz auch erst einmal lassen ohne Dimensionsreduktion durchzuführen.
+
+\subsection{Long Short-Term Memory (LSTM)}
+
+Das Long Short-Term Memory (LSTM) ist ein rekurrentes neuronales Netz. 
+Wir haben zuvor die Wetterdaten betrachtet, welche als Sequenz interpretiert werden können. Wir wollen nun ein Modell erstellen, welches die Regenwahrscheinlichkeit für den Folgetag prognostizieren kann. Unser Ziel ist es den Folgetag als Regentag oder als Nicht-Regentag zu klassifizieren.
+
+Zum Verständnis schauen wir uns im Detail an, wie die LSTM Zelle aufgebaut ist.
+
+\begin{equation}
+\label{eq:lstm_ft}
+f^{(t)}=\sigma\left(W_{f}  h^{(t-1)} + U_{f}  x^{(t)} + V_{f}  c^{(t-1)}\right)
+\end{equation}
+
+
+\begin{equation}
+\label{eq:lstm_it}
+i^{(t)}=\sigma\left(W_{i} h^{(t-1)} + U_{i} x^{(t)} + V_{i} c^{(t-1)}\right)
+\end{equation}
+
+
+
+\begin{equation}
+\label{eq:lstm_tilect}
+\tilde{c}^{(t)}=\tanh \left(W_{c} h^{(t-1)}+ U_{c} x^{(t)}\right)
+\end{equation}
+
+\begin{equation}
+\label{eq:lstm_ct}
+c^{(t)}=f^{(t)} c^{(t-1)}+i^{(t)} \tilde{c}^{(t)}
+\end{equation}
+
+
+
+\begin{equation}
+\label{eq:lstm_ot}
+o^{(t)}=\sigma\left(W_{o} h^{(t-1)}+ U_{o} x^{t} +V_{o} c^{(t)}\right)
+\end{equation}
+
+
+
+\begin{equation}
+\label{eq:lstm_ht}
+h^{(t)}=o^{(t)} \tanh \left(c^{(t)}\right)
+\end{equation}
+
+Rekurrente Netze sind in der Lage Sequenzen zu erlernen, da die Eingabe der Beobachtungen jeweils zu einem gegeben Zeitpunkt $t$ geschehen. Wichtig ist hierbei, dass das Modell weiß, welche Beobachtungen bisher erfolgt sind, wodurch eine Art Gedächtnis benötigt wird. Im Gegensatz zum herkömmlichen neuronalen Netz haben rekurrente Netze einen inneren Zustand, welche als Gedächtnis gesehen werden kann. Dieses Gedächtnis wird über die Gewichte $U$,$W$ und $V$ gewährleistet und über das gesamte Netz geteilt. Während $U$ die Gewichte des Input repräsentieren, stellen die Gewichte $W$ die Gewichte des Hidden-Layer dar. $V$ hingegen bildet die Gewichte zum Ausgangslayer ab.
+
+Gl.\ref{eq:lstm_ft}-\ref{eq:lstm_ht} zeigen die Berechnungen der LSTM Zelle. Dabei stellt Gl.\ref{eq:lstm_ft} das Forget-Gate dar. Gate im Sinne von Schleusen oder Toren steuern den Wissenszustand des Netzes.  Das Forget-Gate (zu deutsch vergessen) entfernt Informationen aus dem Gedächtnis. Der Werte Bereich der Sigmoid Funktion beläuft sich auf [0,1] wodurch Werte nahe 0 als vergessen interpretiert werden können. Weiterhin fällt aber auch auf, dass das Forget-Gate eigene Gewichtsmatrizen $U_f$,$W_f$ und $V_f$ besitzt, welche es zu optimieren gilt. Das Pendant zum Vergessen ist das Erlernen, welches durch das Input-Gate in Gl.\ref{eq:lstm_it} dargestellt wird. Neue Beobachtungen werden hierüber gewichtet, wie stark deren Einfluss Faktor ist und berücksichtigt dabei aber auch erlerntes. Wir erkennen das auch hier wieder eigene Gewichtsmatrizen $U_i$,$W_i$ und $V_i$  vorliegen.
+
+\begin{figure}[h]
+  \includegraphics[width=0.7\linewidth]{res/lstm_cell.png}
+  \caption{LSTM - Zell Aufbau \newline Quelle: \url{http://colah.github.io/posts/2015-08-Understanding-LSTMs/}}
+  \label{fig:lstm}
+\end{figure}
+
+
+In Abb.\ref{fig:lstm} sehen wir den Aufbau der LSTM Zelle. Die Gewichtsmatrize sind an den jeweiligen neuronalen Schichten platziert. Gl.\ref{eq:lstm_ct} zeigt den Kontrollfluss des Gedächtnis auf, sowohl das Forget-Gate als auch das Input-Gate beeinflussen es. Ein weiteren Einfluss nimmt das Output-Gate auf den Kontroll-Fluss. Die Besonderheit hierbei ist, dass $c^{t}$ der Zelle einen aktuellen Zustand des Gedächtnis wiedergibt, während $h^{t}$ die tatsächliche Ausprägung repräsentiert (vgl. Gl.\ref{eq:lstm_ht}). Übertragen wir dies einmal auf einen Menschen, speziell einen Student. Während der Klausurphase wird, dass Input-Gate massiv mit neuen Informationen belastet, gleichzeitig aber auch das Forget-Gate, welches gerade irrelevantes Wissen verdrängt, um Platz für Neues zu schaffen. Heißt jedoch nicht, dass dieses Wissen endgültig verloren ist, es wird einfach temporär verdrängt (bspw. der Sommerurlaub des letztes Jahres). Die schöne Erinnerungen sind jedoch weiterhin beständig in $c$, jedoch nicht in $h$. Nach der Klausurphase lässt sich jedoch oft beobachten, dass das Forget-Gate gegen 0 konvergiert und so alles neu erlernte erstmal verdrängt, um Platz für neue Eindrücke und Erfahrungen für die Semesterferien zu schaffen. Diese neuen Eindrücke werden dann als $\tilde{c}^{t}$ (vgl. Gl.\ref{eq:lstm_tilect})erfasst und rufen zudem Erinnerungen aus vergangenen Semesterferien in $c^{t}$ hoch. 
+
+Wir werden nachfolgend jeweils ein LSTM für Canberra und Darwin erzeugen. Hierbei ziehen wir jeweils ein Klassifikationsproblem heran, als auch ein Regressionsproblem. 
+Bei dem Klassifikationsproblem handelt es sich um binäres Problem, weshalb wir als finale Aktivierungsfunktion die Sigmoid-Funktion nutzen werden. Das Regressionsproblem werden wir jeweils mit der ReLu-Funktion ausstatten. Für das binäre Klassifikationsproblem nehmen wir die Kreuzentropie als Fehlermaß, wobei das MSE auf unser Regressionproblem angewedet wird.
+Es sei noch angemerkt, dass rekurrente neuronale ähnlich zu normalen neuronalen Netzen lernen. Der Lernprozess (Backpropagation) wird ebenfalls  bestimmt durch das zurück propagieren der Gradienten der Fehlerfunktion, welches über ein Minimierungsproblem quantifiziert wird. Wichtig ist jedoch hervorzuheben, dass das zurückpropagieren im zeitlichen Verlauf rückwärts geschieht, wodurch dieses Verfahren auch den Namen \textit{Backpropagation Through Time} (BPTT) erhält.
+
+Ziel dieses Praktikum wird insbesondere sein, in wie weit sich die Modellgüte dieser Modell unterscheidet. Wir haben gesehen, dass die Daten unterschiedliche Varianzen im zeitlichen Verlauf aufzeigen. Insbesondere die Stadt Darwin, welche durch Regen - und Trockenzeit geprägt ist. 
+
+\subsection{Ergebnisse}
+
+\subsubsection*{Temperatur}
+
+Wir verwenden die folgende Netzarchitektur für die Vorhersage der Temperatur. Wir verwenden als Errorfunktion den mean average error und als Output Layer nutzen wir ein Neuron mit der Identität.
+
+```{r, eval=FALSE}
+
+model = keras_model_sequential()
+layer_lstm(model, units = 50, input_shape = shape, return_sequences = TRUE)
+layer_dropout(model, rate = 0.2)
+layer_dense(model, units = 1)
+
+compile(model,
+        loss = 'mae',
+        optimizer = 'rmsprop',
+        metrics = c('mean_squared_error')
+)
+```
+
+\begin{figure}[h]
+  \includegraphics[width=0.75\linewidth]{res/canberra_temp.png}
+  \caption{Canberra Temp 3PM}
+  \label{fig:cantemp}
+\end{figure}
+
+Wir sehen, dass sich der Fehler nach etwa 15 Epochen einpendelt und wir erhalten einen mean average error von $3.831$ auf den Testdaten.
+
+\begin{figure}[h]
+  \includegraphics[width=0.75\linewidth]{res/darwin_temp.png}
+  \caption{Canberra Darwin 3PM}
+  \label{fig:dartemp}
+\end{figure}
+
+Wir sehen, dass sich der Fehler nach etwa 40 Epochen einpendelt und wir erhalten einen mean average error von $2.057$ auf den Testdaten.
+
+Die Temperaturprognose funktioniert soweit sehr gut. Es stellte sich aber heraus, dass es die feature selection ein großes Problem darstellt. Die Ergebnisse waren erst sehr schlecht, bis wir die features auf `MinTemp, MaxTemp, Temp9am` beschränkt haben. Danach haben wir eine gute Prognose erhalten.
+
+Das Ergebnis für die Regenvorhersage war sehr überraschend und verwirrend. Wir verwenden die folgende Netzarchitektur mit einem Neuron und Sigmoid als Aktivierung für binäre Klassifizierung und binary crossentropy als Errorfunktion.
+
+```{r, eval=FALSE}
+model = keras_model_sequential()
+layer_lstm(model, units = 50, input_shape = shape, return_sequences = FALSE)
+layer_dropout(model, rate = 0.2)
+layer_dense(model, units = 1, activation = 'sigmoid')
+
+compile(model,
+        loss = 'binary_crossentropy',
+        optimizer = 'adam',
+        metrics = c('accuracy')
+)
+```
+
+Wir mussten feststellen, dass das LSTM sehr schnell lernt, dass eine durchaus gute Strategie zur Vorhersage ist einfach immer auf Nicht-Regen zu tippen. Das hängt damit zusammen, dass es in den beiden Städten generell wenig regnet und man mit dieser einfachen Vorhersage schon eine Genauigkeit von über $80\%$ erreicht. Dies ist besonders schade, da man in Darwin Regen- und Trockenzeiten in den Daten ausmachen konnte. Dies sieht man auch an den Validierungsdaten, die zufällig aus einer Trockenperiode stammen, denn dort erhält man mit der plumpen Vorhersage, dass es grundsätzlich morgen nicht regnet, eine Genauigkeit von über $95\%$. Man erkennt aber an den leichten Schwankungen, dass das LSTM auf Darwin nicht sofort diese Taktik lernt.
+
+\begin{figure}[h]
+  \includegraphics[width=0.75\linewidth]{res/canberra_rain.png}
+  \caption{Canberra Temp 3PM}
+  \label{fig:canrain}
+\end{figure}
+
+\begin{figure}[h]
+  \includegraphics[width=0.75\linewidth]{res/darwin_rain.png}
+  \caption{Canberra Darwin 3PM}
+  \label{fig:darrain}
+\end{figure}
+
+Wir stellen abschließend fest, dass ein LSTM für numerische Regression durchaus gute Ergebnisse liefert. Für Klassifikation und Regenprognose scheint ein einfaches LSTM nicht ausreichend zu sein. Hierfür bedarf es anscheinend komplexerer Architektur oder erweiterte Dimensionsreduktion.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
